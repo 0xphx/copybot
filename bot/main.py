@@ -2,7 +2,7 @@ import sys
 
 def main():
     if len(sys.argv) < 2:
-        print("Usage: python main.py [import|test|simulate|live]")
+        print("Usage: python main.py [import|test|simulate|live|live_rpc]")
         return
 
     mode = sys.argv[1]
@@ -22,6 +22,10 @@ def main():
     elif mode == "live":
         from runners import live
         live.run()
+
+    elif mode == "live_rpc":
+        from runners import live_rpc
+        live_rpc.run()
 
     else:
         print(f"Unknown mode: {mode}")
