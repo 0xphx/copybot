@@ -15,7 +15,7 @@ def sync_wallets() -> list[ActiveWallet]:
     # Wallets aus der DB laden
     # Kategorien & Limit sind bewusst hier und nicht im Repository
     wallets = load_active_wallets(
-        categories=["Top Trader", "PaperWallet"],  # konfigurierbare Auswahl
+        categories=["Top Trader", "PaperWallet", "OwnWallet"],  # konfigurierbare Auswahl
         limit=50                                # Hard Cap für V1
     )
 
