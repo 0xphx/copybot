@@ -21,15 +21,13 @@ class TradeObserver:
         for event in self.source.listen():
             self.handle_event(event)
 
-    def handle_event(self, event):
-        """
-        Wird von Push-Sources (z.B. Helius Webhook) aufgerufen
-        """
+    async def handle_event(self, event):
         print(
             f"[TradeEvent] {event.wallet} "
             f"{event.side.upper()} {event.amount} {event.token} "
             f"(source={event.source})"
         )
+
 
         # 🔜 nächste Schritte:
         # self.store(event)

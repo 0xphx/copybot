@@ -1,21 +1,12 @@
+# observation/models.py
 from dataclasses import dataclass
+from typing import Any
 
 @dataclass
 class TradeEvent:
-    # Wallet, die den Trade ausgeführt hat
     wallet: str
-
-    # Token Mint Address (oder Symbol später)
     token: str
-
-    # buy oder sell
-    side: str  # "buy" | "sell"
-
-    # Menge des Tokens
+    side: str
     amount: float
-
-    # Unix Timestamp
-    timestamp: int
-
-    # Quelle (debug / monitoring)
-    source: str
+    source: str = "solana_rpc"
+    raw_tx: Any = None
