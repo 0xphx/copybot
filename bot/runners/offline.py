@@ -53,7 +53,7 @@ class OfflineTradeSimulator:
     async def run(self):
         """Startet die Simulation"""
         print("=" * 60)
-        print("🏠 OFFLINE MODE - Trade Simulator")
+        print("[OFFLINE] OFFLINE MODE - Trade Simulator")
         print("=" * 60)
         print(f"\n[Offline] Simulating trades for {len(self.wallets)} wallets")
         print(f"[Offline] Interval: {self.interval}s")
@@ -71,7 +71,7 @@ class OfflineTradeSimulator:
                 
                 # Alle 10 Trades: Statistik
                 if trade_count % 10 == 0:
-                    print(f"\n[Offline] 📊 {trade_count} trades simulated")
+                    print(f"\n[Offline] [RESULTS] {trade_count} trades simulated")
                 
                 await asyncio.sleep(self.interval)
                 
@@ -87,14 +87,14 @@ def run():
         wallet_addresses = [w.wallet for w in active_wallets]
         
         if not wallet_addresses:
-            print("⚠️  No wallets in DB - using demo wallets")
+            print("[WARNING]  No wallets in DB - using demo wallets")
             wallet_addresses = [
                 "Demo1111111111111111111111111111111111111",
                 "Demo2222222222222222222222222222222222222",
                 "Demo3333333333333333333333333333333333333",
             ]
     except Exception as e:
-        print(f"⚠️  Could not load wallets: {e}")
+        print(f"[WARNING]  Could not load wallets: {e}")
         print("Using demo wallets...")
         wallet_addresses = [
             "Demo1111111111111111111111111111111111111",

@@ -41,6 +41,6 @@ class TradeObserver:
             f"(source={event.source})"
         )
 
-        # 🔜 nächste Schritte:
+        #  nächste Schritte:
         # await self.store(event)
         # await self.pattern_engine.process(event)

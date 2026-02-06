@@ -33,8 +33,8 @@ def run():
     wallet_addresses = [w.wallet for w in active_wallets]
     
     if not wallet_addresses:
-        print("\n⚠️  WARNING: No active wallets found!")
-        print("💡 Run: python main.py import")
+        print("\n[WARNING]  WARNING: No active wallets found!")
+        print("[INFO] Run: python main.py import")
         return
 
     # Observer und Source einrichten

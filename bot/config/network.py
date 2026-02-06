@@ -80,19 +80,19 @@ def print_network_info(network: str = None, show_alternatives: bool = False):
     print(f"[Network] RPC: {display_url}")
     
     if network == NETWORK_DEVNET:
-        print("[Network] ℹ️  Devnet - Test environment with airdropped SOL")
-        print("[Network] 🚀 Using Helius RPC (Free Tier)")
+        print("[Network] [INFO]  Devnet - Test environment with airdropped SOL")
+        print("[Network] [INFO] Using Helius RPC (Free Tier)")
     elif network == NETWORK_MAINNET:
-        print("[Network] ⚠️  Mainnet - Real money, real trades!")
-        print("[Network] 🚀 Using Helius RPC (Enhanced features)")
+        print("[Network] [WARNING]  Mainnet - Real money, real trades!")
+        print("[Network] [INFO] Using Helius RPC (Enhanced features)")
     elif network == NETWORK_TESTNET:
-        print("[Network] ℹ️  Testnet - Experimental test environment")
+        print("[Network] [INFO]  Testnet - Experimental test environment")
     elif network == NETWORK_LOCAL:
-        print("[Network] 🏠 Local validator")
+        print("[Network] [OFFLINE] Local validator")
 
 def print_helius_info():
     """Zeigt Info über Helius RPC"""
-    print("\n✅ HELIUS RPC CONFIGURED!")
+    print("\n[OK] HELIUS RPC CONFIGURED!")
     print("   Benefits:")
     print("   • Wallet subscriptions supported")
     print("   • Higher rate limits (100k requests/day)")

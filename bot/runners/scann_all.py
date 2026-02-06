@@ -40,8 +40,8 @@ def run():
     rpc_url = get_rpc_url(network)
     
     if network == NETWORK_MAINNET:
-        print("\n⚠️  WARNING: Mainnet scan produces THOUSANDS of events per second!")
-        print("💡 Consider using Devnet for testing: python main.py scann_all devnet\n")
+        print("\n[WARNING]  WARNING: Mainnet scan produces THOUSANDS of events per second!")
+        print("[INFO] Consider using Devnet for testing: python main.py scann_all devnet\n")
     
     print(f"[ScanAll] DEX Filters: {len(DEX_PROGRAMS)} programs")
     print("Press CTRL+C to stop\n")

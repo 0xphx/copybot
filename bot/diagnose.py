@@ -6,34 +6,34 @@ import sys
 import os
 
 print("=" * 60)
-print("🔍 COPYBOT DIAGNOSTICS")
+print("[DIAGNOSTICS] COPYBOT DIAGNOSTICS")
 print("=" * 60)
 
 # Test 1: Python Version
-print("\n1️⃣ Python Version Check")
+print("\n[1] Python Version Check")
 print(f"   Python: {sys.version}")
 print(f"   Version Info: {sys.version_info}")
 
 if sys.version_info < (3, 10):
-    print("   ⚠️  WARNING: Python 3.10+ recommended")
+    print("   [WARNING]  WARNING: Python 3.10+ recommended")
 else:
-    print("   ✅ Python version OK")
+    print("   [OK] Python version OK")
 
 # Test 2: Dependencies
-print("\n2️⃣ Dependencies Check")
+print("\n[2] Dependencies Check")
 required = ["websockets", "sqlite3", "asyncio", "json", "dataclasses"]
 for package in required:
     try:
         __import__(package)
-        print(f"   ✅ {package}")
+        print(f"   [OK] {package}")
     except ImportError:
-        print(f"   ❌ {package} - MISSING!")
+        print(f"   [ERROR] {package} - MISSING!")
 
 # Test 3: Database Check
-print("\n3️⃣ Database Check")
+print("\n[3] Database Check")
 db_path = "data/axiom.db"
 if os.path.exists(db_path):
-    print(f"   ✅ Database found: {db_path}")
+    print(f"   [OK] Database found: {db_path}")
     
     # Check DB content
     import sqlite3
@@ -43,24 +43,24 @@ if os.path.exists(db_path):
     try:
         cursor.execute("SELECT COUNT(*) FROM axiom_wallets WHERE active = 1")
         count = cursor.fetchone()[0]
-        print(f"   ✅ Active wallets in DB: {count}")
+        print(f"   [OK] Active wallets in DB: {count}")
         
         cursor.execute("SELECT wallet, category FROM axiom_wallets LIMIT 3")
         wallets = cursor.fetchall()
-        print(f"   📋 Sample wallets:")
+        print(f"   [INFO] Sample wallets:")
         for wallet, cat in wallets:
             print(f"      - {wallet[:8]}... ({cat})")
             
     except sqlite3.OperationalError as e:
-        print(f"   ❌ DB Error: {e}")
+        print(f"   [ERROR] DB Error: {e}")
     finally:
         conn.close()
 else:
-    print(f"   ❌ Database NOT found: {db_path}")
-    print(f"   💡 Run: python main.py import")
+    print(f"   [ERROR] Database NOT found: {db_path}")
+    print(f"   [INFO] Run: python main.py import")
 
 # Test 4: Module Imports
-print("\n4️⃣ Module Import Check")
+print("\n[4] Module Import Check")
 modules_to_test = [
     "db.database",
     "axiom.loader",
@@ -73,40 +73,40 @@ modules_to_test = [
 for module in modules_to_test:
     try:
         __import__(module)
-        print(f"   ✅ {module}")
+        print(f"   [OK] {module}")
     except Exception as e:
-        print(f"   ❌ {module} - {e}")
+        print(f"   [ERROR] {module} - {e}")
 
 # Test 5: Wallet Sync Test
-print("\n5️⃣ Wallet Sync Test")
+print("\n[5] Wallet Sync Test")
 try:
     from wallets.sync import sync_wallets
     wallets = sync_wallets()
-    print(f"   ✅ Sync successful: {len(wallets)} wallets loaded")
+    print(f"   [OK] Sync successful: {len(wallets)} wallets loaded")
     
     if wallets:
-        print(f"   📋 First wallet: {wallets[0].wallet[:8]}... ({wallets[0].category})")
+        print(f"   [INFO] First wallet: {wallets[0].wallet[:8]}... ({wallets[0].category})")
     else:
-        print(f"   ⚠️  No wallets found - check DB import")
+        print(f"   [WARNING]  No wallets found - check DB import")
         
 except Exception as e:
-    print(f"   ❌ Sync failed: {e}")
+    print(f"   [ERROR] Sync failed: {e}")
 
 # Test 6: Network Configuration Test
-print("\n6️⃣ Network Configuration Test")
+print("\n[6] Network Configuration Test")
 try:
     from config.network import get_rpc_url, NETWORK_MAINNET, NETWORK_DEVNET, NETWORK_TESTNET
     
-    print(f"   ✅ Network config loaded")
-    print(f"   📡 Mainnet: {get_rpc_url(NETWORK_MAINNET)}")
-    print(f"   📡 Devnet:  {get_rpc_url(NETWORK_DEVNET)}")
-    print(f"   📡 Testnet: {get_rpc_url(NETWORK_TESTNET)}")
+    print(f"   [OK] Network config loaded")
+    print(f"   [INFO] Mainnet: {get_rpc_url(NETWORK_MAINNET)}")
+    print(f"   [INFO] Devnet:  {get_rpc_url(NETWORK_DEVNET)}")
+    print(f"   [INFO] Testnet: {get_rpc_url(NETWORK_TESTNET)}")
     
 except Exception as e:
-    print(f"   ❌ Network config failed: {e}")
+    print(f"   [ERROR] Network config failed: {e}")
 
 # Test 7: Network Connectivity Test (Quick)
-print("\n7️⃣ Network Connectivity Test")
+print("\n[7] Network Connectivity Test")
 try:
     import asyncio
     import websockets
@@ -123,16 +123,16 @@ try:
     result = asyncio.run(quick_test())
     
     if result is True:
-        print("   ✅ Devnet RPC reachable")
+        print("   [OK] Devnet RPC reachable")
     else:
-        print(f"   ⚠️  Devnet RPC issue: {result}")
-        print("   💡 Run: python main.py test_network (full test)")
+        print(f"   [WARNING]  Devnet RPC issue: {result}")
+        print("   [INFO] Run: python main.py test_network (full test)")
         
 except Exception as e:
-    print(f"   ⚠️  Network test skipped: {e}")
+    print(f"   [WARNING]  Network test skipped: {e}")
 
 # Test 8: File Structure
-print("\n8️⃣ File Structure Check")
+print("\n[8] File Structure Check")
 critical_files = [
     "main.py",
     "config/network.py",
@@ -147,16 +147,16 @@ critical_files = [
 
 for file in critical_files:
     if os.path.exists(file):
-        print(f"   ✅ {file}")
+        print(f"   [OK] {file}")
     else:
-        print(f"   ❌ {file} - MISSING!")
+        print(f"   [ERROR] {file} - MISSING!")
 
 print("\n" + "=" * 60)
-print("📊 DIAGNOSIS COMPLETE")
+print("[RESULTS] DIAGNOSIS COMPLETE")
 print("=" * 60)
 
 # Summary
-print("\n💡 NEXT STEPS:")
+print("\n[INFO] NEXT STEPS:")
 print("   1. If DB missing → python main.py import")
 print("   2. If no wallets → Check axiom_wallets.json")
 print("   3. Test networks → python main.py test_network")
