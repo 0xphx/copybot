@@ -1,0 +1,74 @@
+============================================================
+🔬 NETWORK DIAGNOSTIC REPORT
+Generated: 2026-02-05 18:01:16.357362
+System: nt
+============================================================
+
+[TEST 1] Basic Internet Connectivity
+------------------------------------------------------------
+Testing google.com:443... ✅ SUCCESS
+Testing github.com:443... ✅ SUCCESS
+Testing cloudflare.com:443... ✅ SUCCESS
+
+Internet Status: ✅ WORKING
+
+[TEST 2] Solana RPC DNS Resolution
+------------------------------------------------------------
+Resolving api.mainnet-beta.solana.com... ✅ 64.130.57.92
+Resolving api.devnet.solana.com... ✅ 64.130.42.134
+Resolving api.testnet.solana.com... ✅ 192.155.103.41
+
+DNS Status: ✅ WORKING
+
+[TEST 3] Python WebSocket Library
+------------------------------------------------------------
+✅ websockets installed (version: 14.2)
+
+[TEST 4] Proxy Detection
+------------------------------------------------------------
+✅ No proxy environment variables
+
+[TEST 5] WebSocket Connection Test
+------------------------------------------------------------
+
+Testing Devnet: wss://api.devnet.solana.com
+  → Connecting... ✅ CONNECTED
+  → Sending ping... ✅ PONG RECEIVED
+
+Testing Mainnet: wss://api.mainnet-beta.solana.com
+  → Connecting... ✅ CONNECTED
+  → Sending ping... ✅ PONG RECEIVED
+
+------------------------------------------------------------
+✅ At least one network is reachable!
+   ✅ DEVNET - Working
+   ✅ MAINNET - Working
+
+============================================================
+📊 DIAGNOSTIC SUMMARY
+============================================================
+
+✅ Basic connectivity OK!
+   If WebSocket tests failed, try:
+   - Temporarily disable firewall
+   - Temporarily disable antivirus
+   - Use offline mode for testing
+
+============================================================
+📝 NEXT STEPS:
+============================================================
+
+✅ Try these options:
+
+   OPTION A: Offline Mode (ALWAYS works)
+   → python main.py offline
+
+   OPTION B: Test Network (check WebSocket)
+   → python main.py test_network
+
+   OPTION C: Live with Devnet
+   → python main.py live_rpc devnet
+
+============================================================
+Report saved to: network_report.txt
+============================================================
