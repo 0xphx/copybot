@@ -1,44 +1,45 @@
 """
-Live Polling Runner mit Redundancy Engine
-Erkennt koordinierte Trades zwischen Wallets
+Hybrid Runner - Mainnet + Fake Trades
+Perfekt zum Testen der Redundancy Engine!
 """
 import asyncio
 import sys
-from observation.sources.solana_polling import SolanaPollingSource
-from config.network import get_http_url, print_network_info, NETWORK_DEVNET
+from observation.sources.hybrid import HybridTradeSource
+from config.network import get_http_url, print_network_info, NETWORK_MAINNET
 from wallets.sync import sync_wallets
 from pattern.redundancy import RedundancyEngine, TradeSignal
 
 
-# Global Redundancy Engine
 redundancy_engine = None
 
 
 async def handle_trade(event):
-    """Trade Event Handler mit Pattern Detection"""
-    # Normale Trade Ausgabe
+    """Trade Handler mit Source Indicator"""
+    # Farbige Ausgabe je nach Source
+    if event.source == "mainnet_real":
+        prefix = "🟢 [REAL]"
+    elif event.source == "hybrid_fake":
+        prefix = "🔵 [FAKE]"
+    else:
+        prefix = "[Trade]"
+    
     print(
-        f"[TradeEvent] {event.wallet[:8]}... "
+        f"{prefix} {event.wallet[:8]}... "
         f"{event.side.upper()} {event.amount:.4f} {event.token[:8]}... "
-        f"(source={event.source})"
     )
     
     # Pattern Detection
     if redundancy_engine:
         signal = redundancy_engine.process_trade(event)
-        # Signal wird automatisch ausgegeben wenn erkannt
 
 
 def handle_signal(signal: TradeSignal):
-    """
-    Handler für erkannte Signals
-    Hier würde später die Execution passieren
-    """
+    """Handler für erkannte Signals"""
     print()
     print("=" * 70)
     print(f"🚨 STRONG {signal.side} SIGNAL DETECTED!")
     print("=" * 70)
-    print(f"Token:        {signal.token}")
+    print(f"Token:        {signal.token[:12]}...")
     print(f"Side:         {signal.side}")
     print(f"Wallets:      {signal.wallet_count} unique wallets")
     print(f"Total Amount: {signal.total_amount:.4f}")
@@ -51,17 +52,14 @@ def handle_signal(signal: TradeSignal):
         print(f"  - {wallet[:12]}...")
     print("=" * 70)
     print()
-    
-    # TODO: Hier würde Trade Execution passieren
-    # if signal.confidence > 0.7:
-    #     execute_copy_trade(signal)
 
 
-async def run_live_polling(network: str = NETWORK_DEVNET):
-    """Live Trading mit Polling + Redundancy Detection"""
+async def run_hybrid(network: str = NETWORK_MAINNET):
+    """Hybrid Mode: Real + Fake Trades"""
     global redundancy_engine
     
-    # Network Info
+    print("=" * 60)
+    print("🔀 HYBRID MODE - Mainnet + Fake Trades")
     print("=" * 60)
     print_network_info(network)
     print("=" * 60)
@@ -77,14 +75,14 @@ async def run_live_polling(network: str = NETWORK_DEVNET):
     
     print(f"[WalletSync] Active wallets: {len(wallet_addresses)}")
     
-    # HTTP RPC URL
+    # HTTP URL
     http_url = get_http_url(network)
     
-    # Redundancy Engine initialisieren
+    # Redundancy Engine
     redundancy_engine = RedundancyEngine(
-        time_window_seconds=30,  # Trades innerhalb 30 Sekunden
-        min_wallets=2,  # Mind. 2 Wallets müssen kaufen
-        min_confidence=0.5  # Mind. 50% Confidence
+        time_window_seconds=30,
+        min_wallets=2,
+        min_confidence=0.5
     )
     redundancy_engine.on_signal = handle_signal
     
@@ -95,41 +93,46 @@ async def run_live_polling(network: str = NETWORK_DEVNET):
     print(f"   Min Confidence: 50%")
     print()
     
-    # Polling Source erstellen
-    polling_source = SolanaPollingSource(
+    # Hybrid Source
+    hybrid_source = HybridTradeSource(
         rpc_http_url=http_url,
-        wallets=wallet_addresses,
+        real_wallets=wallet_addresses,
         callback=handle_trade,
-        poll_interval=2
+        poll_interval=2,
+        inject_fake_trades=True,
+        fake_trade_interval=20  # Alle 20s ein Pattern
     )
     
-    print(f"[Live Polling] Listening with {len(wallet_addresses)} wallets")
-    print(f"[Live Polling] Poll interval: 2 seconds")
+    print(f"[Hybrid] Listening with {len(wallet_addresses)} wallets")
+    print(f"[Hybrid] Real polling every 2 seconds")
+    print(f"[Hybrid] Fake pattern every 20 seconds")
     print()
-    print("💡 Bot will alert when 2+ wallets buy the same token!")
+    print("🟢 = Real Mainnet Trade")
+    print("🔵 = Injected Fake Trade")
+    print()
+    print("💡 Watch for 🚨 SIGNAL alerts!")
     print("Press CTRL+C to stop")
     print()
     
     try:
-        await polling_source.connect()
+        await hybrid_source.connect()
         
     except (KeyboardInterrupt, asyncio.CancelledError):
-        print("\n[Live Polling] Stopping...")
-        polling_source.stop()
-        print("[Live Polling] Stopped")
+        print("\n[Hybrid] Stopping...")
+        hybrid_source.stop()
+        print("[Hybrid] Stopped")
     except Exception as e:
-        print(f"\n[Live Polling] Error: {e}")
-        polling_source.stop()
+        print(f"\n[Hybrid] Error: {e}")
+        hybrid_source.stop()
 
 
 def run():
     """Entry point"""
-    network = NETWORK_DEVNET
-    if len(sys.argv) > 2:
-        network = sys.argv[2].lower()
+    # Hybrid Mode läuft immer auf Mainnet
+    network = NETWORK_MAINNET
     
     try:
-        asyncio.run(run_live_polling(network))
+        asyncio.run(run_hybrid(network))
     except KeyboardInterrupt:
         pass
 

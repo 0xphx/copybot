@@ -10,6 +10,7 @@ def main():
         print("  simulate               - Simulate trades with fake data")
         print("  offline                - Offline trade simulator (no network needed)")
         print("  live                   - Start Helius webhook listener")
+        print("  hybrid                 - Hybrid mode: Mainnet + Fake trades (TESTING)")
         print("  live_polling [network] - Start POLLING listener (RECOMMENDED)")
         print("  live_rpc [network]     - Start RPC listener (deprecated - doesn't work)")
         print("  scann_all [network]    - Scan all Solana transactions")
@@ -46,6 +47,10 @@ def main():
     elif mode == "live":
         from runners import live
         live.run()
+    
+    elif mode == "hybrid":
+        from runners import hybrid
+        hybrid.run()
         
     elif mode == "scann_all":
         from runners import scann_all
