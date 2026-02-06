@@ -7,22 +7,22 @@ import sys
 import sqlite3
 
 print("=" * 60)
-print("🔧 COPYBOT AUTO-FIX")
+print("[AUTO-FIX] COPYBOT AUTO-FIX")
 print("=" * 60)
 
 def fix_database():
     """Stellt sicher dass DB initialisiert ist"""
-    print("\n1️⃣ Checking Database...")
+    print("\n[1] Checking Database...")
     
     db_path = "data/axiom.db"
     
     if not os.path.exists(db_path):
-        print("   ⚠️  Database missing - creating...")
+        print("   [WARNING]  Database missing - creating...")
         from db.database import init_db
         init_db()
-        print("   ✅ Database created")
+        print("   [OK] Database created")
     else:
-        print("   ✅ Database exists")
+        print("   [OK] Database exists")
     
     # Check if table exists
     conn = sqlite3.connect(db_path)
@@ -31,20 +31,20 @@ def fix_database():
     try:
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='axiom_wallets'")
         if not cursor.fetchone():
-            print("   ⚠️  Table missing - creating...")
+            print("   [WARNING]  Table missing - creating...")
             from db.database import init_db
             init_db()
-            print("   ✅ Table created")
+            print("   [OK] Table created")
         else:
-            print("   ✅ Table exists")
+            print("   [OK] Table exists")
     except Exception as e:
-        print(f"   ❌ Error: {e}")
+        print(f"   [ERROR] Error: {e}")
     finally:
         conn.close()
 
 def fix_wallets():
     """Importiert Wallets wenn keine vorhanden"""
-    print("\n2️⃣ Checking Wallets...")
+    print("\n[2] Checking Wallets...")
     
     db_path = "data/axiom.db"
     conn = sqlite3.connect(db_path)
@@ -55,33 +55,33 @@ def fix_wallets():
         count = cursor.fetchone()[0]
         
         if count == 0:
-            print("   ⚠️  No wallets found - importing...")
+            print("   [WARNING]  No wallets found - importing...")
             from axiom.loader import load_wallets_from_json
             load_wallets_from_json("data/axiom_wallets.json")
-            print("   ✅ Wallets imported")
+            print("   [OK] Wallets imported")
         else:
-            print(f"   ✅ {count} wallets in database")
+            print(f"   [OK] {count} wallets in database")
             
         # Check if active
         cursor.execute("SELECT COUNT(*) FROM axiom_wallets WHERE active = 1")
         active_count = cursor.fetchone()[0]
         
         if active_count == 0 and count > 0:
-            print("   ⚠️  All wallets inactive - activating...")
+            print("   [WARNING]  All wallets inactive - activating...")
             cursor.execute("UPDATE axiom_wallets SET active = 1")
             conn.commit()
-            print("   ✅ Wallets activated")
+            print("   [OK] Wallets activated")
         else:
-            print(f"   ✅ {active_count} active wallets")
+            print(f"   [OK] {active_count} active wallets")
             
     except Exception as e:
-        print(f"   ❌ Error: {e}")
+        print(f"   [ERROR] Error: {e}")
     finally:
         conn.close()
 
 def fix_pycache():
     """Löscht alte .pyc Dateien"""
-    print("\n3️⃣ Cleaning Cache...")
+    print("\n[3] Cleaning Cache...")
     
     removed = 0
     for root, dirs, files in os.walk("."):
@@ -95,13 +95,13 @@ def fix_pycache():
                 pass
     
     if removed > 0:
-        print(f"   ✅ Removed {removed} cache directories")
+        print(f"   [OK] Removed {removed} cache directories")
     else:
-        print("   ✅ No cache to clean")
+        print("   [OK] No cache to clean")
 
 def verify_modules():
     """Prüft ob alle Module importierbar sind"""
-    print("\n4️⃣ Verifying Modules...")
+    print("\n[4] Verifying Modules...")
     
     modules = [
         "db.database",
@@ -115,16 +115,16 @@ def verify_modules():
     for module in modules:
         try:
             __import__(module)
-            print(f"   ✅ {module}")
+            print(f"   [OK] {module}")
         except Exception as e:
-            print(f"   ❌ {module}: {e}")
+            print(f"   [ERROR] {module}: {e}")
             all_ok = False
     
     return all_ok
 
 def check_dependencies():
     """Prüft externe Dependencies"""
-    print("\n5️⃣ Checking Dependencies...")
+    print("\n[5] Checking Dependencies...")
     
     deps = ["websockets"]
     missing = []
@@ -132,13 +132,13 @@ def check_dependencies():
     for dep in deps:
         try:
             __import__(dep)
-            print(f"   ✅ {dep}")
+            print(f"   [OK] {dep}")
         except ImportError:
-            print(f"   ❌ {dep} - MISSING!")
+            print(f"   [ERROR] {dep} - MISSING!")
             missing.append(dep)
     
     if missing:
-        print(f"\n   💡 Install missing dependencies:")
+        print(f"\n   [INFO] Install missing dependencies:")
         print(f"   pip install {' '.join(missing)}")
         return False
     
@@ -155,15 +155,15 @@ try:
     print("\n" + "=" * 60)
     
     if modules_ok and deps_ok:
-        print("✅ ALL FIXES APPLIED - SYSTEM READY")
+        print("[OK] ALL FIXES APPLIED - SYSTEM READY")
         print("=" * 60)
-        print("\n💡 Next steps:")
+        print("\n[INFO] Next steps:")
         print("   1. python diagnose.py    (full system check)")
         print("   2. python main.py live_rpc    (start live trading)")
     else:
-        print("⚠️  SOME ISSUES REMAIN")
+        print("[WARNING]  SOME ISSUES REMAIN")
         print("=" * 60)
-        print("\n💡 Next steps:")
+        print("\n[INFO] Next steps:")
         print("   1. Fix missing dependencies (see above)")
         print("   2. Run: python diagnose.py")
         print("   3. Check: TROUBLESHOOTING.md")
@@ -171,7 +171,7 @@ try:
     print()
 
 except Exception as e:
-    print(f"\n❌ ERROR during auto-fix: {e}")
-    print("💡 Check TROUBLESHOOTING.md for manual fixes")
+    print(f"\n[ERROR] ERROR during auto-fix: {e}")
+    print("[INFO] Check TROUBLESHOOTING.md for manual fixes")
     import traceback
     traceback.print_exc()

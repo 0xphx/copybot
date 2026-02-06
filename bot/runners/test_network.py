@@ -21,22 +21,22 @@ async def test_network(name: str, url: str):
             # Teste mit ping
             pong_waiter = await ws.ping()
             await asyncio.wait_for(pong_waiter, timeout=5)
-            print("✅ ONLINE")
+            print("[OK] ONLINE")
             return True
         finally:
             await ws.close()
             
     except asyncio.TimeoutError:
-        print("❌ TIMEOUT")
+        print("[ERROR] TIMEOUT")
         return False
     except Exception as e:
-        print(f"❌ ERROR: {type(e).__name__}")
+        print(f"[ERROR] ERROR: {type(e).__name__}")
         return False
 
 async def test_all_networks():
     """Testet alle verfügbaren Netzwerke"""
     print("=" * 60)
-    print("🌐 SOLANA NETWORK CONNECTIVITY TEST")
+    print("[NETWORK] SOLANA NETWORK CONNECTIVITY TEST")
     print("=" * 60)
     print()
     
@@ -47,19 +47,19 @@ async def test_all_networks():
     
     print()
     print("=" * 60)
-    print("📊 RESULTS")
+    print("[RESULTS] RESULTS")
     print("=" * 60)
     
     available = [k for k, v in results.items() if v]
     unavailable = [k for k, v in results.items() if not v]
     
     if available:
-        print(f"\n✅ Available networks ({len(available)}):")
+        print(f"\n[OK] Available networks ({len(available)}):")
         for net in available:
             print(f"   - {net}")
     
     if unavailable:
-        print(f"\n❌ Unavailable networks ({len(unavailable)}):")
+        print(f"\n[ERROR] Unavailable networks ({len(unavailable)}):")
         for net in unavailable:
             print(f"   - {net}")
     
@@ -67,13 +67,13 @@ async def test_all_networks():
     
     # Recommendations
     if NETWORK_DEVNET in available:
-        print("💡 RECOMMENDATION: Use Devnet for testing")
+        print("[INFO] RECOMMENDATION: Use Devnet for testing")
         print("   python main.py live_rpc devnet")
     elif NETWORK_MAINNET in available:
-        print("💡 RECOMMENDATION: Mainnet available but use with caution")
+        print("[INFO] RECOMMENDATION: Mainnet available but use with caution")
         print("   python main.py live_rpc mainnet")
     else:
-        print("⚠️  WARNING: No networks available!")
+        print("[WARNING]  WARNING: No networks available!")
         print("   Possible causes:")
         print("   - Firewall blocking WebSockets")
         print("   - Antivirus blocking connections")

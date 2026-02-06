@@ -14,7 +14,7 @@ sys.stdout = f
 
 try:
     print("=" * 60)
-    print(f"🔬 NETWORK DIAGNOSTIC REPORT")
+    print(f"[ADVANCED] NETWORK DIAGNOSTIC REPORT")
     print(f"Generated: {datetime.now()}")
     print(f"System: {os.name}")
     print("=" * 60)
@@ -35,18 +35,18 @@ try:
             print(f"Testing {host}:{port}...", end=" ")
             sock = socket.create_connection((host, port), timeout=5)
             sock.close()
-            print("✅ SUCCESS")
+            print("[OK] SUCCESS")
             internet_works = True
         except socket.timeout:
-            print("❌ TIMEOUT")
+            print("[ERROR] TIMEOUT")
         except socket.gaierror as e:
-            print(f"❌ DNS FAILED: {e}")
+            print(f"[ERROR] DNS FAILED: {e}")
         except ConnectionRefusedError:
-            print("❌ CONNECTION REFUSED")
+            print("[ERROR] CONNECTION REFUSED")
         except Exception as e:
-            print(f"❌ ERROR: {type(e).__name__}: {e}")
+            print(f"[ERROR] ERROR: {type(e).__name__}: {e}")
     
-    print(f"\nInternet Status: {'✅ WORKING' if internet_works else '❌ NOT WORKING'}")
+    print(f"\nInternet Status: {'[OK] WORKING' if internet_works else '[ERROR] NOT WORKING'}")
 
     # Test 2: Solana RPC DNS Resolution
     print("\n[TEST 2] Solana RPC DNS Resolution")
@@ -63,14 +63,14 @@ try:
         try:
             print(f"Resolving {host}...", end=" ")
             ip = socket.gethostbyname(host)
-            print(f"✅ {ip}")
+            print(f"[OK] {ip}")
             dns_works = True
         except socket.gaierror as e:
-            print(f"❌ FAILED: {e}")
+            print(f"[ERROR] FAILED: {e}")
         except Exception as e:
-            print(f"❌ ERROR: {e}")
+            print(f"[ERROR] ERROR: {e}")
     
-    print(f"\nDNS Status: {'✅ WORKING' if dns_works else '❌ NOT WORKING'}")
+    print(f"\nDNS Status: {'[OK] WORKING' if dns_works else '[ERROR] NOT WORKING'}")
 
     # Test 3: WebSocket Library
     print("\n[TEST 3] Python WebSocket Library")
@@ -79,10 +79,10 @@ try:
     websockets_installed = False
     try:
         import websockets
-        print(f"✅ websockets installed (version: {websockets.__version__})")
+        print(f"[OK] websockets installed (version: {websockets.__version__})")
         websockets_installed = True
     except ImportError:
-        print("❌ websockets NOT installed")
+        print("[ERROR] websockets NOT installed")
         print("   Fix: pip install websockets")
 
     # Test 4: Proxy Detection
@@ -95,13 +95,13 @@ try:
     for var in proxy_vars:
         value = os.environ.get(var)
         if value:
-            print(f"⚠️  {var} = {value}")
+            print(f"[WARNING]  {var} = {value}")
             proxy_found = True
     
     if not proxy_found:
-        print("✅ No proxy environment variables")
+        print("[OK] No proxy environment variables")
     else:
-        print("\n⚠️  PROXY DETECTED - This may block WebSockets!")
+        print("\n[WARNING]  PROXY DETECTED - This may block WebSockets!")
 
     # Test 5: Advanced WebSocket Test (if library available)
     print("\n[TEST 5] WebSocket Connection Test")
@@ -123,22 +123,22 @@ try:
                 )
                 
                 try:
-                    print("✅ CONNECTED")
+                    print("[OK] CONNECTED")
                     
                     print("  → Sending ping...", end=" ")
                     pong_waiter = await ws.ping()
                     await asyncio.wait_for(pong_waiter, timeout=5)
-                    print("✅ PONG RECEIVED")
+                    print("[OK] PONG RECEIVED")
                     
                     return True
                 finally:
                     await ws.close()
                     
             except asyncio.TimeoutError:
-                print("❌ TIMEOUT")
+                print("[ERROR] TIMEOUT")
                 return False
             except Exception as e:
-                print(f"❌ {type(e).__name__}: {e}")
+                print(f"[ERROR] {type(e).__name__}: {e}")
                 return False
         
         async def run_tests():
@@ -152,72 +152,72 @@ try:
             
             print("\n" + "-" * 60)
             if any(results.values()):
-                print("✅ At least one network is reachable!")
+                print("[OK] At least one network is reachable!")
                 for net, status in results.items():
                     if status:
-                        print(f"   ✅ {net.upper()} - Working")
+                        print(f"   [OK] {net.upper()} - Working")
             else:
-                print("❌ No Solana networks reachable")
+                print("[ERROR] No Solana networks reachable")
                 print("   This might indicate firewall/antivirus blocking")
                 
         except Exception as e:
-            print(f"❌ WebSocket tests failed: {e}")
+            print(f"[ERROR] WebSocket tests failed: {e}")
             import traceback
             traceback.print_exc()
     else:
-        print("⚠️  Skipped - websockets library not installed")
+        print("[WARNING]  Skipped - websockets library not installed")
 
     # Summary
     print("\n" + "=" * 60)
-    print("📊 DIAGNOSTIC SUMMARY")
+    print("[RESULTS] DIAGNOSTIC SUMMARY")
     print("=" * 60)
     
     issues = []
     recommendations = []
     
     if not internet_works:
-        issues.append("❌ No internet connectivity")
+        issues.append("[ERROR] No internet connectivity")
         recommendations.append("Check your internet connection")
     
     if not dns_works:
-        issues.append("❌ Cannot resolve Solana RPC domains")
+        issues.append("[ERROR] Cannot resolve Solana RPC domains")
         recommendations.append("Try: ipconfig /flushdns")
     
     if not websockets_installed:
-        issues.append("❌ websockets library missing")
+        issues.append("[ERROR] websockets library missing")
         recommendations.append("Run: pip install websockets")
     
     if proxy_found:
-        issues.append("⚠️  Proxy detected")
+        issues.append("[WARNING]  Proxy detected")
         recommendations.append("Try disabling proxy temporarily")
     
     if issues:
-        print("\n🔴 ISSUES FOUND:")
+        print("\n[ISSUE] ISSUES FOUND:")
         for issue in issues:
             print(f"   {issue}")
         
-        print("\n💡 RECOMMENDATIONS:")
+        print("\n[INFO] RECOMMENDATIONS:")
         for i, rec in enumerate(recommendations, 1):
             print(f"   {i}. {rec}")
     else:
-        print("\n✅ Basic connectivity OK!")
+        print("\n[OK] Basic connectivity OK!")
         print("   If WebSocket tests failed, try:")
         print("   - Temporarily disable firewall")
         print("   - Temporarily disable antivirus")
         print("   - Use offline mode for testing")
 
     print("\n" + "=" * 60)
-    print("📝 NEXT STEPS:")
+    print("[NOTE] NEXT STEPS:")
     print("=" * 60)
     
     if not internet_works:
-        print("\n❌ Fix internet connection first")
+        print("\n[ERROR] Fix internet connection first")
     elif not dns_works:
-        print("\n❌ Fix DNS resolution first")
+        print("\n[ERROR] Fix DNS resolution first")
     elif not websockets_installed:
-        print("\n❌ Install websockets first")
+        print("\n[ERROR] Install websockets first")
     else:
-        print("\n✅ Try these options:")
+        print("\n[OK] Try these options:")
         print("\n   OPTION A: Offline Mode (ALWAYS works)")
         print("   → python main.py offline")
         print("\n   OPTION B: Test Network (check WebSocket)")
@@ -230,7 +230,7 @@ try:
     print("=" * 60)
 
 except Exception as e:
-    print(f"\n\n❌ CRITICAL ERROR: {e}")
+    print(f"\n\n[ERROR] CRITICAL ERROR: {e}")
     import traceback
     traceback.print_exc()
 
@@ -238,5 +238,5 @@ finally:
     sys.stdout = original_stdout
     f.close()
     
-    print(f"\n✅ Network diagnostic complete!")
-    print(f"📄 Report saved to: {os.path.abspath(output_file)}")
+    print(f"\n[OK] Network diagnostic complete!")
+    print(f" Report saved to: {os.path.abspath(output_file)}")
