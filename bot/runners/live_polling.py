@@ -61,10 +61,13 @@ async def run_live_polling(network: str = NETWORK_DEVNET):
         # Polling starten
         await polling_source.connect()
         
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, asyncio.CancelledError):
         print("\n[Live Polling] Stopping...")
         polling_source.stop()
         print("[Live Polling] Stopped")
+    except Exception as e:
+        print(f"\n[Live Polling] Error: {e}")
+        polling_source.stop()
 
 
 def run():
@@ -74,7 +77,10 @@ def run():
     if len(sys.argv) > 2:
         network = sys.argv[2].lower()
     
-    asyncio.run(run_live_polling(network))
+    try:
+        asyncio.run(run_live_polling(network))
+    except KeyboardInterrupt:
+        pass  # Sauberer Exit ohne Fehlermeldung
 
 
 if __name__ == "__main__":
