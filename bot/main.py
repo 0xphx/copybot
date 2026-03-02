@@ -11,6 +11,8 @@ def main():
         print("  offline                - Offline trade simulator (no network needed)")
         print("  live                   - Start Helius webhook listener")
         print("  hybrid                 - Hybrid mode: Mainnet + Fake trades (TESTING)")
+        print("  paper                  - Paper Trading: Hybrid mode (Mainnet + Fake)")
+        print("  paper_mainnet          - Paper Trading: Pure mainnet (No fakes)")
         print("  live_polling [network] - Start POLLING listener (RECOMMENDED)")
         print("  live_rpc [network]     - Start RPC listener (deprecated - doesn't work)")
         print("  scann_all [network]    - Scan all Solana transactions")
@@ -51,6 +53,16 @@ def main():
     elif mode == "hybrid":
         from runners import hybrid
         hybrid.run()
+    
+    elif mode == "paper":
+        from runners import paper_trading
+        import asyncio
+        asyncio.run(paper_trading.main())
+    
+    elif mode == "paper_mainnet":
+        from runners import paper_mainnet
+        import asyncio
+        asyncio.run(paper_mainnet.main())
         
     elif mode == "scann_all":
         from runners import scann_all

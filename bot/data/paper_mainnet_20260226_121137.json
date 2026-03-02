@@ -1,0 +1,33 @@
+{
+  "initial_capital": 1000.0,
+  "cash_eur": 1000.0,
+  "positions": [],
+  "trade_history": [
+    {
+      "token": "4kqBEohyWb1CLJrkehJtMpxLGccqCnQY7jWrsYespump",
+      "side": "BUY",
+      "price_eur": 0.01,
+      "amount": 20000.0,
+      "value_eur": 200.0,
+      "timestamp": "2026-02-26T12:10:11.094363",
+      "trigger_wallets": [
+        "PMJA8UQDyWTFw2Smhyp9jGA6aTaP7jKHR7BPudrgyYN"
+      ],
+      "pnl_eur": null,
+      "pnl_percent": null
+    },
+    {
+      "token": "4kqBEohyWb1CLJrkehJtMpxLGccqCnQY7jWrsYespump",
+      "side": "SELL",
+      "price_eur": 0.01,
+      "amount": 20000.0,
+      "value_eur": 200.0,
+      "timestamp": "2026-02-26T12:11:37.519754",
+      "trigger_wallets": [
+        "PMJA8UQDyWTFw2Smhyp9jGA6aTaP7jKHR7BPudrgyYN"
+      ],
+      "pnl_eur": 0.0,
+      "pnl_percent": 0.0
+    }
+  ]
+}

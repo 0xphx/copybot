@@ -1,0 +1,95 @@
+{
+  "initial_capital": 1000.0,
+  "cash_eur": 1000.0,
+  "positions": [],
+  "trade_history": [
+    {
+      "token": "TestCoin2222222222222222222222222222222",
+      "side": "BUY",
+      "price_eur": 0.01,
+      "amount": 20000.0,
+      "value_eur": 200.0,
+      "timestamp": "2026-02-09T10:38:54.952879",
+      "trigger_wallets": [
+        "G9u3uBMCstdf9gatnPbYteKFnczGFPEnbWaq4bnuC2Ub",
+        "CAPn1yH4oSywsxGU456jfgTrSSUidf9jgeAnHceNUJdw"
+      ],
+      "pnl_eur": null,
+      "pnl_percent": null
+    },
+    {
+      "token": "FakeToken2222222222222222222222222222222",
+      "side": "BUY",
+      "price_eur": 0.01,
+      "amount": 16000.0,
+      "value_eur": 160.0,
+      "timestamp": "2026-02-09T10:39:21.639986",
+      "trigger_wallets": [
+        "G3g1CKqKWSVEVURZDNMazDBv7YAhMNTjhJBVRTiKZygk",
+        "DnhJdhSKVXbF1z5a4fosyBrxyjtwEZzQCRBYTqbZC4e3"
+      ],
+      "pnl_eur": null,
+      "pnl_percent": null
+    },
+    {
+      "token": "TestCoin2222222222222222222222222222222",
+      "side": "SELL",
+      "price_eur": 0.01,
+      "amount": 20000.0,
+      "value_eur": 200.0,
+      "timestamp": "2026-02-09T10:39:45.075762",
+      "trigger_wallets": [
+        "G9u3uBMCstdf9gatnPbYteKFnczGFPEnbWaq4bnuC2Ub",
+        "CAPn1yH4oSywsxGU456jfgTrSSUidf9jgeAnHceNUJdw"
+      ],
+      "pnl_eur": 0.0,
+      "pnl_percent": 0.0
+    },
+    {
+      "token": "TestCoin2222222222222222222222222222222",
+      "side": "BUY",
+      "price_eur": 0.01,
+      "amount": 16800.0,
+      "value_eur": 168.0,
+      "timestamp": "2026-02-09T10:39:47.233832",
+      "trigger_wallets": [
+        "4BdKaxN8G6ka4GYtQQWk4G4dZRUTX2vQH9GcXdBREFUk",
+        "G9u3uBMCstdf9gatnPbYteKFnczGFPEnbWaq4bnuC2Ub",
+        "CAPn1yH4oSywsxGU456jfgTrSSUidf9jgeAnHceNUJdw",
+        "86AEJExyjeNNgcp7GrAvCXTDicf5aGWgoERbXFiG1EdD"
+      ],
+      "pnl_eur": null,
+      "pnl_percent": null
+    },
+    {
+      "token": "FakeToken2222222222222222222222222222222",
+      "side": "SELL",
+      "price_eur": 0.01,
+      "amount": 16000.0,
+      "value_eur": 160.0,
+      "timestamp": "2026-02-09T10:40:11.904353",
+      "trigger_wallets": [
+        "G3g1CKqKWSVEVURZDNMazDBv7YAhMNTjhJBVRTiKZygk",
+        "DnhJdhSKVXbF1z5a4fosyBrxyjtwEZzQCRBYTqbZC4e3"
+      ],
+      "pnl_eur": 0.0,
+      "pnl_percent": 0.0
+    },
+    {
+      "token": "TestCoin2222222222222222222222222222222",
+      "side": "SELL",
+      "price_eur": 0.01,
+      "amount": 16800.0,
+      "value_eur": 168.0,
+      "timestamp": "2026-02-09T10:40:11.904993",
+      "trigger_wallets": [
+        "4BdKaxN8G6ka4GYtQQWk4G4dZRUTX2vQH9GcXdBREFUk",
+        "G9u3uBMCstdf9gatnPbYteKFnczGFPEnbWaq4bnuC2Ub",
+        "CAPn1yH4oSywsxGU456jfgTrSSUidf9jgeAnHceNUJdw",
+        "86AEJExyjeNNgcp7GrAvCXTDicf5aGWgoERbXFiG1EdD"
+      ],
+      "pnl_eur": 0.0,
+      "pnl_percent": 0.0
+    }
+  ]
+}

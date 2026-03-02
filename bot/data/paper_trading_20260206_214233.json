@@ -1,0 +1,63 @@
+{
+  "initial_capital": 1000.0,
+  "cash_eur": 1021.5339977200695,
+  "positions": [],
+  "trade_history": [
+    {
+      "token": "FakeToken2222222222222222222222222222222",
+      "side": "BUY",
+      "price_eur": 0.9657227998400716,
+      "amount": 207.09876584991156,
+      "value_eur": 200.0,
+      "timestamp": "2026-02-06T21:41:50.169502",
+      "trigger_wallets": [
+        "CyaE1VxvBrahnPWkqm5VsdCvyS2QmNht2UFrKJHga54o",
+        "J6TDXvarvpBdPXTaTU8eJbtso1PUCYKGkVtMKUUY8iEa"
+      ],
+      "pnl_eur": null,
+      "pnl_percent": null
+    },
+    {
+      "token": "FakeToken1111111111111111111111111111111",
+      "side": "BUY",
+      "price_eur": 0.0017048640589693072,
+      "amount": 93849.12489546505,
+      "value_eur": 160.0,
+      "timestamp": "2026-02-06T21:42:13.750492",
+      "trigger_wallets": [
+        "CAPn1yH4oSywsxGU456jfgTrSSUidf9jgeAnHceNUJdw",
+        "3wjyaSegfV7SZzjv9Ut1p6AcY5ZdoZjmu6i6QPCVvnmz"
+      ],
+      "pnl_eur": null,
+      "pnl_percent": null
+    },
+    {
+      "token": "FakeToken2222222222222222222222222222222",
+      "side": "SELL",
+      "price_eur": 0.9202469709923988,
+      "amount": 207.09876584991156,
+      "value_eur": 190.58201196964515,
+      "timestamp": "2026-02-06T21:42:33.750223",
+      "trigger_wallets": [
+        "CyaE1VxvBrahnPWkqm5VsdCvyS2QmNht2UFrKJHga54o",
+        "J6TDXvarvpBdPXTaTU8eJbtso1PUCYKGkVtMKUUY8iEa"
+      ],
+      "pnl_eur": -9.417988030354834,
+      "pnl_percent": -4.708994015177417
+    },
+    {
+      "token": "FakeToken1111111111111111111111111111111",
+      "side": "SELL",
+      "price_eur": 0.002034669859341986,
+      "amount": 93849.12489546505,
+      "value_eur": 190.95198575042434,
+      "timestamp": "2026-02-06T21:42:33.751356",
+      "trigger_wallets": [
+        "CAPn1yH4oSywsxGU456jfgTrSSUidf9jgeAnHceNUJdw",
+        "3wjyaSegfV7SZzjv9Ut1p6AcY5ZdoZjmu6i6QPCVvnmz"
+      ],
+      "pnl_eur": 30.951985750424328,
+      "pnl_percent": 19.344991094015203
+    }
+  ]
+}

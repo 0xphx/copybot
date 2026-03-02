@@ -1,6 +1,7 @@
 """
 Solana Polling Source - Alternative zu WebSocket Subscriptions
 Fragt regelmäßig Wallet-Transaktionen ab und erkennt Trades
+MIT CONNECTION HEALTH MONITORING
 """
 import asyncio
 import json
@@ -31,6 +32,7 @@ class SolanaPollingSource(TradeSource):
     1. Alle X Sekunden: Hole neueste Transactions für jede Wallet
     2. Vergleiche Signatures mit bereits gesehenen
     3. Neue Transactions → Parse & Emit Trade Events
+    4. 🛡️ Connection Monitoring → Emergency Exit bei Netzwerkausfall
     """
 
     def __init__(
@@ -38,17 +40,35 @@ class SolanaPollingSource(TradeSource):
         rpc_http_url: str,
         wallets: list[str] = None,
         callback=None,
-        poll_interval: int = 2,  # Sekunden zwischen Abfragen
+        poll_interval: int = 2,
+        ignore_initial_txs: bool = True,
+        fast_poll_interval: float = 0.5,
+        connection_monitor=None,  # 🛡️ Connection Health Monitor
     ):
         super().__init__()
         self.rpc_http_url = rpc_http_url
         self.wallets = list(wallets or [])
         self.poll_interval = poll_interval
-        self.seen_signatures: Set[str] = set()  # Bereits verarbeitete Transactions
+        self.fast_poll_interval = fast_poll_interval
+        self.seen_signatures: Set[str] = set()
         self.running = False
+        self.ignore_initial_txs = ignore_initial_txs
+        self.initial_load_done = False
         
-        print(f"[Polling] Poll interval: {poll_interval}s")
+        # Dynamisches Polling
+        self.watch_wallets: Set[str] = set()
+        self.is_fast_polling = False
+        
+        # 🛡️ Connection Monitoring
+        self.connection_monitor = connection_monitor
+        
+        print(f"[Polling] Normal interval: {poll_interval}s")
+        print(f"[Polling] Fast interval: {fast_poll_interval}s (when position open)")
         print(f"[Polling] Watching {len(self.wallets)} wallets")
+        if ignore_initial_txs:
+            print(f"[Polling] Ignoring transactions before start time")
+        if connection_monitor:
+            print(f"[Polling] 🛡️ Connection monitoring ENABLED")
         
         if callback:
             self.on_trade = callback
@@ -59,42 +79,61 @@ class SolanaPollingSource(TradeSource):
         self.running = True
         logger.info(f"[Polling] Starting with {len(self.wallets)} wallets")
         
+        # 🛡️ Starte Connection Monitor
+        if self.connection_monitor:
+            await self.connection_monitor.start()
+        
         async with aiohttp.ClientSession() as session:
             self.session = session
             
             try:
                 while self.running:
                     await self.poll_all_wallets()
-                    await asyncio.sleep(self.poll_interval)
+                    
+                    # Dynamisches Intervall basierend auf offenen Positionen
+                    if self.is_fast_polling:
+                        await asyncio.sleep(self.fast_poll_interval)
+                    else:
+                        await asyncio.sleep(self.poll_interval)
                     
             except asyncio.CancelledError:
                 logger.info("[Polling] Cancelled, stopping...")
                 self.running = False
                 raise
+            finally:
+                # 🛡️ Stoppe Connection Monitor
+                if self.connection_monitor:
+                    self.connection_monitor.stop()
 
 
     async def poll_all_wallets(self):
         """Fragt alle Wallets gleichzeitig ab"""
-        tasks = [self.poll_wallet(wallet) for wallet in self.wallets]
+        if self.is_fast_polling and self.watch_wallets:
+            tasks = [self.poll_wallet(wallet) for wallet in self.watch_wallets]
+        else:
+            tasks = [self.poll_wallet(wallet) for wallet in self.wallets]
+        
         await asyncio.gather(*tasks, return_exceptions=True)
+        
+        if not self.initial_load_done:
+            self.initial_load_done = True
+            if self.ignore_initial_txs:
+                logger.info("[Polling] Initial load complete - now watching for NEW transactions only")
 
 
     async def poll_wallet(self, wallet: str):
         """
         Fragt neueste Transactions einer Wallet ab
-        
-        API Call: getSignaturesForAddress
-        Gibt Liste der neuesten Transaction Signatures zurück
+        🛡️ MIT CONNECTION MONITORING
         """
         try:
-            # Request Body
             payload = {
                 "jsonrpc": "2.0",
                 "id": 1,
                 "method": "getSignaturesForAddress",
                 "params": [
                     wallet,
-                    {"limit": 5}  # Nur die letzten 5 Transactions
+                    {"limit": 5}
                 ]
             }
             
@@ -105,13 +144,16 @@ class SolanaPollingSource(TradeSource):
             ) as response:
                 data = await response.json()
                 
+                # 🛡️ SUCCESS → Melde an Monitor
+                if self.connection_monitor:
+                    self.connection_monitor.record_success()
+                
                 if "error" in data:
                     logger.error(f"[Polling] RPC Error for {wallet[:8]}...: {data['error']}")
                     return
                 
                 signatures = data.get("result", [])
                 
-                # Neue Signatures finden
                 new_sigs = []
                 for sig_info in signatures:
                     sig = sig_info.get("signature")
@@ -119,25 +161,29 @@ class SolanaPollingSource(TradeSource):
                         new_sigs.append(sig)
                         self.seen_signatures.add(sig)
                 
+                if not self.initial_load_done and self.ignore_initial_txs:
+                    if new_sigs:
+                        logger.debug(f"[Polling] {wallet[:8]}... marked {len(new_sigs)} initial transactions as seen")
+                    return
+                
                 if new_sigs:
                     logger.info(f"[Polling] {wallet[:8]}... has {len(new_sigs)} new transactions")
                     
-                    # Hole Details für neue Transactions
                     for sig in new_sigs:
                         await self.fetch_and_process_transaction(sig, wallet)
                         
-        except asyncio.TimeoutError:
-            logger.warning(f"[Polling] Timeout for wallet {wallet[:8]}...")
-        except Exception as e:
+        except (asyncio.TimeoutError, aiohttp.ClientError, OSError) as e:
+            # 🛡️ FAILURE → Melde an Monitor
+            if self.connection_monitor:
+                self.connection_monitor.record_failure()
+            
             logger.error(f"[Polling] Error polling wallet {wallet[:8]}...: {e}")
+        except Exception as e:
+            logger.error(f"[Polling] Unexpected error polling wallet {wallet[:8]}...: {e}")
 
 
     async def fetch_and_process_transaction(self, signature: str, wallet: str):
-        """
-        Holt Transaction Details und verarbeitet sie
-        
-        API Call: getTransaction
-        """
+        """Holt Transaction Details und verarbeitet sie"""
         try:
             payload = {
                 "jsonrpc": "2.0",
@@ -167,7 +213,6 @@ class SolanaPollingSource(TradeSource):
                 if not tx:
                     return
                 
-                # Trade extrahieren
                 trade_event = self.extract_trade(tx, wallet, signature)
                 if trade_event:
                     await self.emit_trade(trade_event)
@@ -177,22 +222,16 @@ class SolanaPollingSource(TradeSource):
 
 
     def extract_trade(self, tx: dict, wallet: str, signature: str) -> Optional[TradeEvent]:
-        """
-        Extrahiert Trade Information aus Transaction
-        
-        Schaut auf Token Balance Änderungen (pre vs post)
-        """
+        """Extrahiert Trade Information aus Transaction"""
         try:
             meta = tx.get("meta", {})
             
-            # Pre/Post Token Balances
             pre_balances = meta.get("preTokenBalances", [])
             post_balances = meta.get("postTokenBalances", [])
             
             if not pre_balances and not post_balances:
                 return None
             
-            # Balance Maps: {mint: amount}
             pre = {}
             post = {}
             
@@ -208,7 +247,6 @@ class SolanaPollingSource(TradeSource):
                 if mint and amount is not None:
                     post[mint] = float(amount)
             
-            # Deltas berechnen
             all_mints = set(pre.keys()).union(post.keys())
             deltas = {}
             
@@ -223,7 +261,6 @@ class SolanaPollingSource(TradeSource):
             if not deltas:
                 return None
             
-            # Kategorisiere: Currency vs Asset
             currency_deltas = {}
             asset_deltas = {}
             
@@ -233,9 +270,7 @@ class SolanaPollingSource(TradeSource):
                 else:
                     asset_deltas[mint] = delta
             
-            # Trade identifizieren
             if currency_deltas and asset_deltas:
-                # Currency <-> Asset Swap
                 asset_mint = list(asset_deltas.keys())[0]
                 asset_delta = asset_deltas[asset_mint]
                 
@@ -252,7 +287,6 @@ class SolanaPollingSource(TradeSource):
                 )
             
             elif asset_deltas:
-                # Asset <-> Asset Swap
                 sorted_assets = sorted(
                     asset_deltas.items(),
                     key=lambda x: abs(x[1]),
@@ -280,7 +314,10 @@ class SolanaPollingSource(TradeSource):
 
     async def emit_trade(self, trade_event: TradeEvent):
         """Emit Trade Event"""
-        logger.info(f"[Polling] Trade detected: {trade_event}")
+        logger.debug(
+            f"[Polling] Trade: {trade_event.wallet[:8]}... "
+            f"{trade_event.side} {trade_event.amount:.2f} {trade_event.token[:8]}..."
+        )
         
         if self.on_trade:
             if asyncio.iscoroutinefunction(self.on_trade):
@@ -293,6 +330,38 @@ class SolanaPollingSource(TradeSource):
         """Stoppt Polling"""
         self.running = False
         logger.info("[Polling] Stopping...")
+    
+    def get_polling_status(self) -> dict:
+        """Gibt aktuellen Polling Status zurück"""
+        status = {
+            'is_fast_polling': self.is_fast_polling,
+            'watch_wallets': list(self.watch_wallets),
+            'current_interval': self.fast_poll_interval if self.is_fast_polling else self.poll_interval
+        }
+        
+        # 🛡️ Connection Monitor Status
+        if self.connection_monitor:
+            status['connection'] = self.connection_monitor.get_status()
+        
+        return status
+    
+    def start_watching_wallets(self, wallets: list[str]):
+        """Startet schnelles Polling für bestimmte Wallets"""
+        self.watch_wallets = set(wallets)
+        was_fast = self.is_fast_polling
+        self.is_fast_polling = True
+        
+        if not was_fast:
+            logger.info(f"[Polling] ⚡ FAST MODE activated for {len(wallets)} wallets (polling every {self.fast_poll_interval}s)")
+    
+    def stop_watching_wallets(self):
+        """Stoppt schnelles Polling"""
+        was_fast = self.is_fast_polling
+        self.watch_wallets.clear()
+        self.is_fast_polling = False
+        
+        if was_fast:
+            logger.info(f"[Polling] 🐢 NORMAL MODE restored (polling every {self.poll_interval}s)")
     
     def listen(self):
         """Dummy method for abstract base class (not used in async polling)"""

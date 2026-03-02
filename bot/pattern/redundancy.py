@@ -67,7 +67,15 @@ class RedundancyEngine:
         if signal:
             logger.info(f"[RedundancyEngine] {signal}")
             if self.on_signal:
-                self.on_signal(signal)
+                # Prüfe ob Callback async ist
+                import asyncio
+                import inspect
+                if inspect.iscoroutinefunction(self.on_signal):
+                    # Async callback - erstelle Task
+                    asyncio.create_task(self.on_signal(signal))
+                else:
+                    # Sync callback
+                    self.on_signal(signal)
         
         return signal
     

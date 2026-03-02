@@ -3,6 +3,20 @@
     { "wallet": "CyaE1VxvBrahnPWkqm5VsdCvyS2QmNht2UFrKJHga54o", "category": "PaperWallet" },
     { "wallet": "G9u3uBMCstdf9gatnPbYteKFnczGFPEnbWaq4bnuC2Ub", "category": "PaperWallet" },
     { "wallet": "ACTbvbNm5qTLuofNRPxFPMtHAAtdH1CtzhCZatYHy831", "category": "PaperWallet" },
-    { "wallet": "9z3LRC24JRyTj2w7T71V5zycvQrtLHeepEGZLnHybfoG", "category": "PaperWallet" }
-  ]
-  
+    { "wallet": "9z3LRC24JRyTj2w7T71V5zycvQrtLHeepEGZLnHybfoG", "category": "PaperWallet" },
+    { "wallet": "5B79fMkcFeRTiwm7ehsZsFiKsC7m7n1Bgv9yLxPp9q2X", "category": "SmartWallet" },
+    { "wallet": "3LUfv2u5yzsDtUzPdsSJ7ygPBuqwfycMkjpNreRR2Yww", "category": "SmartWallet" },
+    { "wallet": "FAicXNV5FVqtfbpn4Zccs71XcfGeyxBSGbqLDyDJZjke", "category": "SmartWallet" },
+    { "wallet": "PMJA8UQDyWTFw2Smhyp9jGA6aTaP7jKHR7BPudrgyYN", "category": "SmartWallet" },
+    { "wallet": "4BdKaxN8G6ka4GYtQQWk4G4dZRUTX2vQH9GcXdBREFUk", "category": "SmartWallet" },
+    { "wallet": "J6TDXvarvpBdPXTaTU8eJbtso1PUCYKGkVtMKUUY8iEa", "category": "SmartWallet" },
+    { "wallet": "G3g1CKqKWSVEVURZDNMazDBv7YAhMNTjhJBVRTiKZygk", "category": "SmartWallet" },
+    { "wallet": "GM7Hrz2bDq33ezMtL6KGidSWZXMWgZ6qBuugkb5H8NvN", "category": "SmartWallet" },
+    { "wallet": "F5TjPySiUJMdvqMZHnPP85Rc1vErDGV5FR5P2vdVm429", "category": "SmartWallet" },
+    { "wallet": "GfXQesPe3Zuwg8JhAt6Cg8euJDTVx751enp9EQQmhzPH", "category": "SmartWallet" },
+    { "wallet": "3wjyaSegfV7SZzjv9Ut1p6AcY5ZdoZjmu6i6QPCVvnmz", "category": "SmartWallet" },
+    { "wallet": "86AEJExyjeNNgcp7GrAvCXTDicf5aGWgoERbXFiG1EdD", "category": "SmartWallet" },
+    { "wallet": "CvNiezB8hofusHCKqu8irJ6t2FKY7VjzpSckofMzk5mB", "category": "SmartWallet" },
+    { "wallet": "CAPn1yH4oSywsxGU456jfgTrSSUidf9jgeAnHceNUJdw", "category": "SmartWallet" },
+    { "wallet": "71PCu3E4JP5RDBoY6wJteqzxkKNXLyE1byg5BTAL9UtQ", "category": "SmartWallet" }
+]
