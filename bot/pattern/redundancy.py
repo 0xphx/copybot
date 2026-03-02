@@ -1,6 +1,9 @@
 """
 Redundancy Engine - Erkennt koordinierte Trades
 Wenn mehrere Wallets das gleiche Token kaufen = SIGNAL
+
+Confidence Score berücksichtigt jetzt die historische Performance
+der Wallets aus der wallet_performance.db.
 """
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -45,16 +48,20 @@ class RedundancyEngine:
         time_window_seconds: int = 30,
         min_wallets: int = 2,
         min_confidence: float = 0.5,
+        wallet_tracker=None,  # Optional: WalletTracker Instanz für historische Confidence
     ):
         self.time_window = timedelta(seconds=time_window_seconds)
         self.min_wallets = min_wallets
         self.min_confidence = min_confidence
+        self.wallet_tracker = wallet_tracker  # Kann None sein → kein DB-Lookup
         self.recent_trades: Dict[tuple, List[TradeEvent]] = defaultdict(list)
         self.on_signal = None
         
+        tracker_status = "mit DB-Confidence" if wallet_tracker else "ohne DB-Confidence"
         logger.info(
             f"[RedundancyEngine] window={time_window_seconds}s, "
-            f"min_wallets={min_wallets}, confidence={min_confidence:.0%}"
+            f"min_wallets={min_wallets}, confidence={min_confidence:.0%}, "
+            f"{tracker_status}"
         )
     
     def process_trade(self, trade: TradeEvent) -> Optional[TradeSignal]:
@@ -67,14 +74,11 @@ class RedundancyEngine:
         if signal:
             logger.info(f"[RedundancyEngine] {signal}")
             if self.on_signal:
-                # Prüfe ob Callback async ist
                 import asyncio
                 import inspect
                 if inspect.iscoroutinefunction(self.on_signal):
-                    # Async callback - erstelle Task
                     asyncio.create_task(self.on_signal(signal))
                 else:
-                    # Sync callback
                     self.on_signal(signal)
         
         return signal
@@ -115,7 +119,11 @@ class RedundancyEngine:
         window_seconds = (last_time - first_time).total_seconds()
         
         confidence = self._calculate_confidence(
-            wallet_count, len(trades), window_seconds, [t.amount for t in trades]
+            wallets=list(unique_wallets),
+            wallet_count=wallet_count,
+            trade_count=len(trades),
+            window_seconds=window_seconds,
+            amounts=[t.amount for t in trades]
         )
         
         if confidence < self.min_confidence:
@@ -134,8 +142,44 @@ class RedundancyEngine:
             confidence=confidence
         )
     
-    def _calculate_confidence(self, wallet_count, trade_count, window_seconds, amounts) -> float:
-        """Berechnet Confidence Score"""
+    def _calculate_confidence(
+        self,
+        wallets: List[str],
+        wallet_count: int,
+        trade_count: int,
+        window_seconds: float,
+        amounts: List[float]
+    ) -> float:
+        """
+        Berechnet Confidence Score.
+        
+        Ohne WalletTracker (original Logik):
+            - Wallet Count Score  (0–50 Punkte)
+            - Timing Score        (10–30 Punkte)
+            - Konsistenz Score    (0–20 Punkte)
+        
+        Mit WalletTracker (erweiterte Logik):
+            - Historischer Wallet Performance Score ersetzt den einfachen
+              Wallet Count Score. Gute Wallets = höherer Score.
+        """
+        
+        if self.wallet_tracker is not None:
+            return self._calculate_confidence_with_history(
+                wallets, wallet_count, trade_count, window_seconds, amounts
+            )
+        else:
+            return self._calculate_confidence_basic(
+                wallet_count, trade_count, window_seconds, amounts
+            )
+    
+    def _calculate_confidence_basic(
+        self,
+        wallet_count: int,
+        trade_count: int,
+        window_seconds: float,
+        amounts: List[float]
+    ) -> float:
+        """Original Confidence Berechnung (ohne DB)"""
         wallet_score = min(wallet_count * 0.1, 0.5)
         
         if window_seconds < 5:
@@ -157,6 +201,76 @@ class RedundancyEngine:
             consistency_score = 0.1
         
         return min(wallet_score + time_score + consistency_score, 1.0)
+    
+    def _calculate_confidence_with_history(
+        self,
+        wallets: List[str],
+        wallet_count: int,
+        trade_count: int,
+        window_seconds: float,
+        amounts: List[float]
+    ) -> float:
+        """
+        Erweiterte Confidence Berechnung mit historischer Wallet-Performance.
+        
+        Gewichtung:
+          40% – Durchschnittlicher historischer Confidence Score der Wallets
+          30% – Timing (je schneller koordiniert, desto besser)
+          20% – Wallet Count (mehr unabhängige Wallets = besser)
+          10% – Konsistenz der Trade-Größen
+        """
+        
+        # 1. Historischer Wallet Score (40%)
+        conf_map = self.wallet_tracker.get_confidence_map(wallets)
+        avg_hist_confidence = sum(conf_map.values()) / len(conf_map) if conf_map else 0.5
+        history_score = avg_hist_confidence * 0.40
+        
+        # Wenn alle Wallets neutral (0.5) → wir haben noch keine Daten
+        # In diesem Fall stärker auf timing/count verlassen
+        all_neutral = all(v == 0.5 for v in conf_map.values())
+        if all_neutral:
+            # Fallback auf originale Logik
+            return self._calculate_confidence_basic(
+                wallet_count, trade_count, window_seconds, amounts
+            )
+        
+        # 2. Timing Score (30%)
+        if window_seconds < 5:
+            time_score = 0.30
+        elif window_seconds < 15:
+            time_score = 0.20
+        elif window_seconds < 30:
+            time_score = 0.10
+        else:
+            time_score = 0.05
+        
+        # 3. Wallet Count Score (20%) – logarithmisch skaliert
+        # 1 Wallet = 0.05, 2 = 0.10, 5 = 0.17, 10 = 0.20
+        import math
+        count_score = min(math.log(wallet_count + 1, 11), 1.0) * 0.20
+        
+        # 4. Konsistenz Score (10%)
+        if amounts and len(amounts) > 1:
+            avg = sum(amounts) / len(amounts)
+            if avg > 0:
+                variances = [(abs(a - avg) / avg) for a in amounts]
+                avg_variance = sum(variances) / len(variances)
+                consistency_score = max(0, 0.10 - (avg_variance * 0.10))
+            else:
+                consistency_score = 0.05
+        else:
+            consistency_score = 0.05
+        
+        total = history_score + time_score + count_score + consistency_score
+        
+        logger.debug(
+            f"[RedundancyEngine] Confidence breakdown: "
+            f"history={history_score:.2f} timing={time_score:.2f} "
+            f"count={count_score:.2f} consistency={consistency_score:.2f} "
+            f"→ total={total:.2f}"
+        )
+        
+        return min(total, 1.0)
     
     def _get_trade_time(self, trade: TradeEvent) -> datetime:
         """Trade Timestamp"""

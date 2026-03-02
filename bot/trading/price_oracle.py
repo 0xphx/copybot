@@ -1,6 +1,7 @@
 """
 Price Oracle - Holt Token Preise in EUR
-Nutzt Jupiter, Birdeye und CoinGecko
+Waterfall: DexScreener → Birdeye → CoinGecko
+Jupiter v2 / Lite wurden entfernt (erfordern API Key → HTTP 401/404)
 """
 import aiohttp
 import logging
@@ -33,113 +34,33 @@ class PriceOracle:
         return self.session
 
     async def get_price_eur(self, token_address: str, skip_cache: bool = False) -> Optional[float]:
-        """Holt Preis in EUR für Token"""
-        
-        # Cache check (skip wenn Force Refresh)
+        """
+        Holt Preis in EUR für Token.
+        Gibt None zurück wenn kein echter Preis gefunden wurde – kein Mock-Fallback.
+        """
+        # Cache check
         if not skip_cache and token_address in self.cache:
             self.hit_count += 1
             return self.cache[token_address]
         
         self.fetch_count += 1
-        
-        # Versuche Jupiter API v6
-        price = await self._fetch_from_jupiter_v6(token_address)
-        
-        if price is None:
-            # Fallback: Jupiter Lite (alternativer Endpoint)
-            price = await self._fetch_from_jupiter_lite(token_address)
 
-        if price is None:
-            # Fallback: DexScreener (kein API Key nötig, sehr zuverlässig)
-            price = await self._fetch_from_dexscreener(token_address)
+        sources = [
+            ("DexScreener", self._fetch_from_dexscreener),
+            ("Birdeye",     self._fetch_from_birdeye),
+            ("CoinGecko",   self._fetch_from_coingecko),
+        ]
 
-        if price is None:
-            # Fallback: Birdeye
-            price = await self._fetch_from_birdeye(token_address)
-        
-        if price is None:
-            # Fallback: CoinGecko (nur bekannte Tokens)
-            price = await self._fetch_from_coingecko(token_address)
-        
-        if price is None:
-            logger.warning(f"[PriceOracle] No price found for {token_address[:8]}..., using mock price")
-            price = 0.01
-            self.miss_count += 1
-        
-        self.cache[token_address] = price
-        return price
-    
-    async def _fetch_from_jupiter_v6(self, token_address: str) -> Optional[float]:
-        """Holt Preis von Jupiter Price API v2"""
-        try:
-            session = await self._get_session()
-            url = f"https://api.jup.ag/price/v2?ids={token_address}"
-            
-            async with session.get(url, timeout=aiohttp.ClientTimeout(total=8)) as response:
-                if response.status != 200:
-                    logger.debug(f"[PriceOracle] Jupiter v2 HTTP {response.status} for {token_address[:8]}...")
-                    return None
-                
-                data = await response.json()
-                
-                if "data" not in data:
-                    logger.debug(f"[PriceOracle] Jupiter v2 no 'data' key: {data}")
-                    return None
+        for name, fetch_fn in sources:
+            price = await fetch_fn(token_address)
+            if price is not None:
+                self.cache[token_address] = price
+                return price
+            logger.warning(f"[PriceOracle] ❌ {name} → no price for {token_address[:8]}...")
 
-                token_data = data["data"].get(token_address)
-                if token_data is None:
-                    logger.debug(f"[PriceOracle] Jupiter v2 token not found in response")
-                    return None
-                
-                price_usd_str = token_data.get("price")
-                if price_usd_str is None:
-                    logger.debug(f"[PriceOracle] Jupiter v2 no 'price' field: {token_data}")
-                    return None
-                
-                price_usd = float(price_usd_str)
-                if price_usd == 0:
-                    return None
-
-                price_eur = price_usd * 0.92
-                logger.info(f"[PriceOracle] ✅ Jupiter: {token_address[:8]}... = {price_eur:.8f} EUR (${price_usd:.8f})")
-                return price_eur
-                
-        except Exception as e:
-            logger.debug(f"[PriceOracle] Jupiter v2 failed: {type(e).__name__}: {e}")
-            return None
-
-    async def _fetch_from_jupiter_lite(self, token_address: str) -> Optional[float]:
-        """Holt Preis von Jupiter Lite API (alternativer Endpoint)"""
-        try:
-            session = await self._get_session()
-            # Lite API - direkter Quote gegen USDC
-            usdc = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
-            url = f"https://lite-api.jup.ag/price/v2?ids={token_address}&vsToken={usdc}"
-            
-            async with session.get(url, timeout=aiohttp.ClientTimeout(total=8)) as response:
-                if response.status != 200:
-                    return None
-                
-                data = await response.json()
-                token_data = data.get("data", {}).get(token_address)
-                if not token_data:
-                    return None
-
-                price_usd_str = token_data.get("price")
-                if not price_usd_str:
-                    return None
-
-                price_usd = float(price_usd_str)
-                if price_usd == 0:
-                    return None
-
-                price_eur = price_usd * 0.92
-                logger.info(f"[PriceOracle] ✅ Jupiter Lite: {token_address[:8]}... = {price_eur:.8f} EUR")
-                return price_eur
-
-        except Exception as e:
-            logger.debug(f"[PriceOracle] Jupiter Lite failed: {type(e).__name__}: {e}")
-            return None
+        logger.warning(f"[PriceOracle] ⚠️  All sources failed for {token_address[:8]}... – skipping (no mock)")
+        self.miss_count += 1
+        return None
 
     async def _fetch_from_dexscreener(self, token_address: str) -> Optional[float]:
         """Holt Preis von DexScreener (kein API Key nötig, sehr zuverlässig für Solana Memecoins)"""
@@ -149,7 +70,7 @@ class PriceOracle:
             
             async with session.get(url, timeout=aiohttp.ClientTimeout(total=8)) as response:
                 if response.status != 200:
-                    logger.debug(f"[PriceOracle] DexScreener HTTP {response.status}")
+                    logger.warning(f"[PriceOracle] DexScreener HTTP {response.status}")
                     return None
                 
                 data = await response.json()
@@ -159,13 +80,10 @@ class PriceOracle:
                     logger.debug(f"[PriceOracle] DexScreener no pairs for {token_address[:8]}...")
                     return None
                 
-                # Nimm das Pair mit höchstem Liquidity (erstes = meist bestes)
-                # Filtere nur Solana Pairs
                 sol_pairs = [p for p in pairs if p.get("chainId") == "solana"]
                 if not sol_pairs:
-                    sol_pairs = pairs  # Fallback: alle Pairs
+                    sol_pairs = pairs
                 
-                # Sortiere nach Liquidity
                 sol_pairs.sort(key=lambda p: float(p.get("liquidity", {}).get("usd", 0) or 0), reverse=True)
                 best_pair = sol_pairs[0]
                 
@@ -182,7 +100,7 @@ class PriceOracle:
                 return price_eur
                 
         except Exception as e:
-            logger.debug(f"[PriceOracle] DexScreener failed: {type(e).__name__}: {e}")
+            logger.warning(f"[PriceOracle] DexScreener exception: {type(e).__name__}: {e}")
             return None
 
     async def _fetch_from_birdeye(self, token_address: str) -> Optional[float]:
@@ -197,7 +115,7 @@ class PriceOracle:
                 timeout=aiohttp.ClientTimeout(total=8)
             ) as response:
                 if response.status != 200:
-                    logger.debug(f"[PriceOracle] Birdeye HTTP {response.status}")
+                    logger.warning(f"[PriceOracle] Birdeye HTTP {response.status}")
                     return None
                 
                 data = await response.json()
@@ -218,7 +136,7 @@ class PriceOracle:
                 return price_eur
                 
         except Exception as e:
-            logger.debug(f"[PriceOracle] Birdeye failed: {type(e).__name__}: {e}")
+            logger.warning(f"[PriceOracle] Birdeye exception: {type(e).__name__}: {e}")
             return None
     
     async def _fetch_from_coingecko(self, token_address: str) -> Optional[float]:
@@ -245,7 +163,7 @@ class PriceOracle:
                 return price_eur
                 
         except Exception as e:
-            logger.debug(f"[PriceOracle] CoinGecko failed: {type(e).__name__}: {e}")
+            logger.warning(f"[PriceOracle] CoinGecko exception: {type(e).__name__}: {e}")
             return None
     
     async def get_multiple_prices(self, token_addresses: list) -> Dict[str, float]:

@@ -19,6 +19,7 @@ from trading.portfolio import PaperPortfolio
 from trading.price_oracle import PriceOracle, MockPriceOracle
 from trading.engine import PaperTradingEngine
 from trading.connection_monitor import ConnectionHealthMonitor
+from trading.wallet_tracker import WalletTracker
 
 # Logging
 logging.basicConfig(
@@ -179,9 +180,9 @@ class PaperTradingMainnetRunner:
         
         # 8. Stop-Loss
         while True:
-            sl_input = input("🛑 Stop-Loss (%) [-15]: ").strip()
+            sl_input = input("🛑 Stop-Loss (%) [-50]: ").strip()
             if not sl_input:
-                self.config['stop_loss'] = -15.0
+                self.config['stop_loss'] = -50.0
                 break
             try:
                 sl = float(sl_input.lstrip('-'))
@@ -195,9 +196,9 @@ class PaperTradingMainnetRunner:
         
         # 9. Take-Profit
         while True:
-            tp_input = input("🎯 Take-Profit (%) [50]: ").strip()
+            tp_input = input("🎯 Take-Profit (%) [100]: ").strip()
             if not tp_input:
-                self.config['take_profit'] = 50.0
+                self.config['take_profit'] = 100.0
                 break
             try:
                 tp = float(tp_input.lstrip('+'))
@@ -254,11 +255,13 @@ class PaperTradingMainnetRunner:
             check_interval=5.0
         )
         
-        # 5. Redundancy Engine
+        # 5. Redundancy Engine (mit historischen Confidence Scores falls vorhanden)
+        tracker = WalletTracker()
         self.redundancy = RedundancyEngine(
             time_window_seconds=self.config['time_window'],
             min_wallets=self.config['min_wallets'],
-            min_confidence=self.config['min_confidence']
+            min_confidence=self.config['min_confidence'],
+            wallet_tracker=tracker
         )
         
         # Signal Handler für BUY/SELL Signals von Redundancy Engine
@@ -485,11 +488,11 @@ class PaperTradingMainnetRunner:
         self.total_signals += 1
         
         if signal_obj.side == "BUY":
-            # 🚫 SKIP: Bereits offene Position für diesen Token
-            if self.portfolio.has_position(signal_obj.token):
+            # 🚫 SKIP: Irgendeine Position ist bereits offen
+            if self.portfolio.positions:
                 logger.debug(
-                    f"[Runner] Ignoring duplicate BUY for {signal_obj.token[:8]}... "
-                    f"(position already open)"
+                    f"[Runner] Ignoring BUY for {signal_obj.token[:8]}... "
+                    f"(position already open – waiting for SELL first)"
                 )
                 return
             

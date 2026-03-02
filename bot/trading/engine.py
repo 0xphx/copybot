@@ -24,8 +24,8 @@ class PaperTradingEngine:
         price_oracle: PriceOracle,
         polling_source=None,
         price_update_interval: int = 10,
-        stop_loss_percent: float = -15.0,    # -15% → automatischer Verkauf
-        take_profit_percent: float = 50.0,   # +50% → automatischer Verkauf
+        stop_loss_percent: float = -50.0,    # -50% → automatischer Verkauf
+        take_profit_percent: float = 100.0,  # +100% → automatischer Verkauf
     ):
         self.portfolio = portfolio
         self.oracle = price_oracle
