@@ -211,63 +211,65 @@ class RedundancyEngine:
         amounts: List[float]
     ) -> float:
         """
-        Erweiterte Confidence Berechnung mit historischer Wallet-Performance.
-        
+        Hybrid Confidence: Signal wird ausgelöst wenn mehrere gut bewertete
+        Wallets denselben Coin kaufen. Wallet-Qualität ist der Kernfaktor.
+
         Gewichtung:
-          40% – Durchschnittlicher historischer Confidence Score der Wallets
-          30% – Timing (je schneller koordiniert, desto besser)
-          20% – Wallet Count (mehr unabhängige Wallets = besser)
-          10% – Konsistenz der Trade-Größen
+          55% – Historischer Wallet Confidence Score (Durchschnitt aller beteiligten Wallets)
+          25% – Wallet Count (mehr übereinstimmende gute Wallets = stärkeres Signal)
+          15% – Timing (Koordination, weniger kritisch als früher)
+           5% – Konsistenz der Trade-Größen (bei Memecoins kaum aussagekräftig)
         """
         
-        # 1. Historischer Wallet Score (40%)
-        conf_map = self.wallet_tracker.get_confidence_map(wallets)
-        avg_hist_confidence = sum(conf_map.values()) / len(conf_map) if conf_map else 0.5
-        history_score = avg_hist_confidence * 0.40
-        
-        # Wenn alle Wallets neutral (0.5) → wir haben noch keine Daten
-        # In diesem Fall stärker auf timing/count verlassen
-        all_neutral = all(v == 0.5 for v in conf_map.values())
-        if all_neutral:
-            # Fallback auf originale Logik
-            return self._calculate_confidence_basic(
-                wallet_count, trade_count, window_seconds, amounts
-            )
-        
-        # 2. Timing Score (30%)
-        if window_seconds < 5:
-            time_score = 0.30
-        elif window_seconds < 15:
-            time_score = 0.20
-        elif window_seconds < 30:
-            time_score = 0.10
-        else:
-            time_score = 0.05
-        
-        # 3. Wallet Count Score (20%) – logarithmisch skaliert
-        # 1 Wallet = 0.05, 2 = 0.10, 5 = 0.17, 10 = 0.20
         import math
-        count_score = min(math.log(wallet_count + 1, 11), 1.0) * 0.20
-        
-        # 4. Konsistenz Score (10%)
+
+        # Wallet Confidence Scores aus DB holen
+        conf_map = self.wallet_tracker.get_confidence_map(wallets)
+
+        # 1. History Score (55%)
+        # Durchschnitt der Wallet-Confidence-Scores aller beteiligten Wallets.
+        # Neutrale Wallets (0.5) dämpfen das Signal – kein Fallback mehr.
+        # Nur wenn alle Wallets echte (nicht-neutrale) Scores haben ist das Signal stark.
+        avg_hist_confidence = sum(conf_map.values()) / len(conf_map) if conf_map else 0.5
+        history_score = avg_hist_confidence * 0.55
+
+        # 2. Wallet Count Score (25%) – logarithmisch
+        # Mehr übereinstimmende gute Wallets = stärkeres Signal
+        # 2 Wallets = 0.11, 3 = 0.16, 5 = 0.20, 10 = 0.25
+        count_score = min(math.log(wallet_count + 1, 11), 1.0) * 0.25
+
+        # 3. Timing Score (15%)
+        # Wie koordiniert haben die Wallets gekauft?
+        # Weniger kritisch als bisher – ein gutes Wallet das 15s später kauft ist trotzdem wertvoll
+        if window_seconds < 5:
+            time_score = 0.15
+        elif window_seconds < 15:
+            time_score = 0.10
+        elif window_seconds < 30:
+            time_score = 0.05
+        else:
+            time_score = 0.02
+
+        # 4. Konsistenz Score (5%)
+        # Bei Memecoins variieren Kaufmengen stark – kaum aussagekräftig
         if amounts and len(amounts) > 1:
             avg = sum(amounts) / len(amounts)
             if avg > 0:
                 variances = [(abs(a - avg) / avg) for a in amounts]
                 avg_variance = sum(variances) / len(variances)
-                consistency_score = max(0, 0.10 - (avg_variance * 0.10))
+                consistency_score = max(0, 0.05 - (avg_variance * 0.05))
             else:
-                consistency_score = 0.05
+                consistency_score = 0.02
         else:
-            consistency_score = 0.05
-        
+            consistency_score = 0.02
+
         total = history_score + time_score + count_score + consistency_score
-        
+
         logger.debug(
             f"[RedundancyEngine] Confidence breakdown: "
-            f"history={history_score:.2f} timing={time_score:.2f} "
-            f"count={count_score:.2f} consistency={consistency_score:.2f} "
-            f"→ total={total:.2f}"
+            f"history={history_score:.2f} (avg_wallet={avg_hist_confidence:.2f}) "
+            f"count={count_score:.2f} timing={time_score:.2f} "
+            f"consistency={consistency_score:.2f} → total={total:.2f}"
         )
         
         return min(total, 1.0)

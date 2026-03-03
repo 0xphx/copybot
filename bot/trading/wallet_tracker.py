@@ -207,10 +207,36 @@ class WalletTracker:
         if total_trades < self.MIN_TRADES_FOR_SCORE:
             confidence = 0.5
         else:
-            wr_score = win_rate * 0.60
+            import math
+
+            # 1. Win Rate: 0–45 Punkte
+            wr_score = win_rate * 0.45
+
+            # 2. Trade Count: 0–20 Punkte, sättigt bei 50 Trades
             count_score = min(total_trades / 50, 1.0) * 0.20
-            avg_pnl_clamped = max(-50, min(50, avg_pnl))
-            pnl_score = ((avg_pnl_clamped + 50) / 100) * 0.20
+
+            # 3. Avg P&L Score: 0–35 Punkte, relativ + logarithmisch
+            #
+            # Basis: Positionsgröße = CAPITAL_PER_WALLET * POSITION_SIZE
+            #        = 1000 EUR * 20% = 200 EUR
+            # avg_pnl_pct = durchschnittlicher P&L als % des eingesetzten Kapitals
+            # Formel: log2(1 + max(avg_pnl_pct, 0) / 25) / log2(21) * 0.20
+            #
+            # Beispiele:
+            #   avg_pnl_pct =   0% → 0.00
+            #   avg_pnl_pct = +25% → 0.05
+            #   avg_pnl_pct = +50% → 0.08
+            #   avg_pnl_pct = +100% → 0.11
+            #   avg_pnl_pct = +200% → 0.14
+            #   avg_pnl_pct = +500% → 0.18  (praktisch Maximum)
+            #
+            # Verluste geben 0 Punkte (kein negativer Einfluss – Win Rate bestraft bereits)
+            position_size_eur = 200.0  # 1000 EUR * 20%
+            avg_pnl_pct = (avg_pnl / position_size_eur) * 100  # z.B. +25 EUR → +12.5%
+            avg_pnl_pct_pos = max(avg_pnl_pct, 0.0)            # Verluste → 0
+            pnl_score = (math.log2(1 + avg_pnl_pct_pos / 25) / math.log2(21)) * 0.35
+            pnl_score = min(pnl_score, 0.35)                   # Hard cap bei 35 Punkten
+
             confidence = round(wr_score + count_score + pnl_score, 4)
             confidence = max(0.0, min(1.0, confidence))
         
@@ -237,10 +263,11 @@ class WalletTracker:
         conn.commit()
         conn.close()
         
+        avg_pnl_pct_display = (avg_pnl / 200.0) * 100
         logger.debug(
             f"[WalletTracker] {wallet[:8]}... → "
             f"confidence={confidence:.2f} | win_rate={win_rate:.0%} | "
-            f"trades={total_trades} | avg_pnl={avg_pnl:+.2f} EUR"
+            f"trades={total_trades} | avg_pnl={avg_pnl:+.2f} EUR ({avg_pnl_pct_display:+.1f}% of position)"
         )
     
     def get_confidence(self, wallet: str) -> float:

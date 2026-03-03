@@ -703,48 +703,56 @@ class WalletAnalysisRunner:
         else:
             sorted_accounts = sorted(active_accounts, key=lambda a: a.total_pnl_eur, reverse=True)
 
-            print(f"   {'Wallet':<22} {'Trades':>6} {'Win%':>6} {'P&L EUR':>10}  {'Confidence':>10}")
-            print("   " + "-"*65)
+            # Spaltenbreiten Wallet-Übersicht
+            # Marker(1) + 2sp + Wallet(44+3) + Trades(6) + Win%(6) + P&L EUR(12) + Confidence(10)
+            print(f"  {'':1}  {'Wallet':<47} {'Trades':>6} {'Win%':>6} {'P&L EUR':>12} {'Confidence':>10}")
+            print("  " + "-"*86)
 
             for acc in sorted_accounts:
                 conf    = self.tracker.get_confidence(acc.wallet)
-                pnl_str = f"{acc.total_pnl_eur:+.2f}"
+                pnl_str = f"{acc.total_pnl_eur:+.2f} EUR"
                 wr_str  = f"{acc.win_rate*100:.0f}%"
-                emoji   = "🟢" if acc.total_pnl_eur > 0 else "🔴" if acc.total_pnl_eur < 0 else "⚪"
+                marker  = "+" if acc.total_pnl_eur > 0 else "-" if acc.total_pnl_eur < 0 else " "
+                wallet  = f"{acc.wallet[:44]}..."
                 print(
-                    f"   {emoji} {acc.wallet[:20]}...  "
-                    f"{acc.num_trades:>5}x  "
-                    f"{wr_str:>5}  "
-                    f"{pnl_str:>9} EUR  "
-                    f"{conf:>10.2f}"
+                    f"  {marker}  {wallet:<47}"
+                    f" {acc.num_trades:>5}x"
+                    f" {wr_str:>6}"
+                    f" {pnl_str:>12}"
+                    f" {conf:>10.2f}"
                 )
 
             total_pnl = sum(a.total_pnl_eur for a in active_accounts)
-            print("   " + "-"*65)
-            print(f"   {'TOTAL':<24} {'':>6} {'':>6} {total_pnl:>+9.2f} EUR")
+            print("  " + "-"*86)
+            print(f"     {'TOTAL':<47} {'':>6} {'':>6} {f'{total_pnl:+.2f} EUR':>12}")
 
             print()
             print("="*70)
             print("📋 TRADE DETAILS PER WALLET")
             print("="*70)
 
+            # Spaltenbreiten Trade-Details
+            # res(2) + 2sp + Token(12) + Entry EUR(14) + Exit EUR(14) + P&L EUR(11) + P&L%(8) + Flag
+            trade_header  = f"  {'':2}  {'Token':<12} {'Entry EUR':>14} {'Exit EUR':>14} {'P&L EUR':>11} {'P&L%':>8}  Flag"
+            trade_divider = "  " + "-"*69
+
             for acc in sorted_accounts:
                 sells = [t for t in acc.closed_trades if t['side'] == 'SELL']
                 if not sells:
                     continue
                 conf = self.tracker.get_confidence(acc.wallet)
-                print(f"\n  🔑 {acc.wallet[:24]}...  confidence: {conf:.2f}")
-                print(f"  {'Token':<12} {'Entry EUR':>14} {'Exit EUR':>14} {'P&L EUR':>10} {'P&L%':>8}  {'Flag'}")
-                print(f"  {'-'*72}")
+                print(f"\n  Wallet: {acc.wallet[:44]}...  confidence: {conf:.2f}")
+                print(trade_header)
+                print(trade_divider)
                 for t in sells:
-                    result = "✅" if (t['pnl_eur'] or 0) >= 0 else "❌"
-                    flag   = " ⚠️ price_missing" if t.get('price_missing') else ""
+                    result = "OK" if (t['pnl_eur'] or 0) >= 0 else "--"
+                    flag   = " [price_missing]" if t.get('price_missing') else ""
                     print(
-                        f"  {result} {t['token'][:10]:<10}  "
-                        f"{t.get('entry_price_eur', 0):>14.8f}  "
-                        f"{t['price_eur']:>14.8f}  "
-                        f"{t['pnl_eur']:>+9.2f}  "
-                        f"{t.get('pnl_percent', 0):>+7.1f}%"
+                        f"  {result}  {t['token'][:12]:<12}"
+                        f" {t.get('entry_price_eur', 0):>14.8f}"
+                        f" {t['price_eur']:>14.8f}"
+                        f" {t['pnl_eur']:>+11.2f}"
+                        f" {t.get('pnl_percent', 0):>+7.1f}%"
                         f"{flag}"
                     )
 
