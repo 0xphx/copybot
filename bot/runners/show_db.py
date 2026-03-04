@@ -28,8 +28,19 @@ def show_wallet_stats(filter_min_trades: int = 0, sort_by: str = "confidence"):
     order = order_map.get(sort_by, "confidence_score DESC")
 
     cursor.execute(f"""
-        SELECT * FROM wallet_stats
-        WHERE total_trades >= ?
+        SELECT
+            ws.*,
+            ROUND(
+                SUM(CASE WHEN wt.price_missing = 0 THEN wt.pnl_percent ELSE 0 END) /
+                NULLIF(COUNT(CASE WHEN wt.price_missing = 0 AND wt.pnl_percent IS NOT NULL THEN 1 END), 0)
+            , 1) as ev_pct
+        FROM wallet_stats ws
+        LEFT JOIN wallet_trades wt
+            ON wt.wallet = ws.wallet
+            AND wt.side = 'SELL'
+            AND wt.pnl_percent IS NOT NULL
+        WHERE ws.total_trades >= ?
+        GROUP BY ws.wallet
         ORDER BY {order}
     """, (filter_min_trades,))
     rows = cursor.fetchall()
@@ -39,31 +50,46 @@ def show_wallet_stats(filter_min_trades: int = 0, sort_by: str = "confidence"):
         print("  (keine Einträge)")
         return
 
-    print(f"  {'#':<4} {'Wallet':<18} {'Trades':>6} {'Win%':>6} {'P&L EUR':>10} {'Avg P&L':>9} {'Confidence':>22}  {'Updated'}")
-    print("  " + "─"*100)
+    from trading.wallet_tracker import STRATEGY_SL_TP
+
+    # Spaltenbreiten
+    C_IDX    = 3
+    C_WALLET = 16
+    C_TRADES = 5
+    C_WIN    = 5
+    C_AVG    = 10
+    C_CONF   = 5
+    C_LABEL  = 11  # "LOSS_MAKER" ist längstes Label
+    C_SL     = 7
+    C_TP     = 8
+    C_DATE   = 16
+
+    header = (
+        f"  {'#':>{C_IDX}}  {'Wallet':<{C_WALLET}}"
+        f"  {'Trades':>{C_TRADES}}  {'Win%':>{C_WIN}}"
+        f"  {'EV %':>{C_AVG}}"
+        f"  {'Conf':>{C_CONF}}  {'Strategy':<{C_LABEL}}  {'SL':>{C_SL}}  {'TP':>{C_TP}}  Updated"
+    )
+    divider = "  " + "─" * (C_IDX + C_WALLET + C_TRADES + C_WIN + C_AVG + C_CONF + C_LABEL + C_SL + C_TP + C_DATE + 22)
+    print(header)
+    print(divider)
 
     for i, r in enumerate(rows, 1):
-        conf   = r['confidence_score']
+        conf     = r['confidence_score']
         wr_str   = f"{r['win_rate']*100:.0f}%"
-        pnl_str  = f"{r['total_pnl_eur']:+.2f}"
-        avg_str  = f"{r['avg_pnl_eur']:+.2f}"
-        updated  = r['last_updated'][:16]
-
-        if conf >= 0.7:
-            emoji = "🟢"
-        elif conf >= 0.5:
-            emoji = "🟡"
-        else:
-            emoji = "🔴"
+        ev_str   = f"{r['ev_pct']:+.1f}%" if r['ev_pct'] is not None else "n/a"
+        updated  = r['last_updated'][:16].replace('T', ' ')
+        label    = r['strategy_label'] if 'strategy_label' in r.keys() else 'UNKNOWN'
+        sl, tp   = STRATEGY_SL_TP.get(label, STRATEGY_SL_TP['UNKNOWN'])
+        sl_str   = f"{sl:.0f}%" if label != 'UNKNOWN' else "--"
+        tp_str   = f"+{tp:.0f}%" if label != 'UNKNOWN' else "--"
+        marker   = "+" if conf >= 0.7 else "~" if conf >= 0.5 else "-"
 
         print(
-            f"  {i:<4} {emoji} {r['wallet'][:16]:<16}  "
-            f"{r['total_trades']:>5}x  "
-            f"{wr_str:>5}  "
-            f"{pnl_str:>9} EUR  "
-            f"{avg_str:>8} EUR  "
-            f"{conf:>6.2f}  "
-            f"{updated}"
+            f"  {i:>{C_IDX}}  {marker} {r['wallet'][:C_WALLET]:<{C_WALLET}}"
+            f"  {r['total_trades']:>{C_TRADES}}x  {wr_str:>{C_WIN}}"
+            f"  {ev_str:>{C_AVG}}"
+            f"  {conf:>{C_CONF}.2f}  {label:<{C_LABEL}}  {sl_str:>{C_SL}}  {tp_str:>{C_TP}}  {updated}"
         )
 
     print()
@@ -157,9 +183,24 @@ def show_wallet_detail(wallet_prefix: str):
 
     print(f"  🔑 Wallet: {wallet}")
     if stats:
-        conf = stats['confidence_score']
-        bar  = "█" * int(conf * 20) + "░" * (20 - int(conf * 20))
-        print(f"  Confidence:  {bar} {conf:.2f}")
+        from trading.wallet_tracker import STRATEGY_SL_TP
+        conf  = stats['confidence_score']
+        label = stats['strategy_label'] if 'strategy_label' in stats.keys() else 'UNKNOWN'
+        sl, tp = STRATEGY_SL_TP.get(label, STRATEGY_SL_TP['UNKNOWN'])
+        # Inaktivitäts-Tags aus DB lesen
+        tag_conn = sqlite3.connect(DB_PATH)
+        tag_conn.row_factory = sqlite3.Row
+        tag_cur = tag_conn.cursor()
+        tag_cur.execute("SELECT tags FROM wallet_inactivity_tags WHERE wallet = ?", (wallet,))
+        tag_row = tag_cur.fetchone()
+        tag_conn.close()
+        tags = tag_row['tags'] if tag_row else 0
+        max_tags = 3
+        timeout = "5 Min" if tags >= max_tags else "10 Min"
+
+        print(f"  Confidence:  {conf:.2f}")
+        print(f"  Strategie:   {label}" + (f"  →  SL {sl:.0f}% / TP +{tp:.0f}%" if label != 'UNKNOWN' else "  (noch < 20 saubere Trades)"))
+        print(f"  Inaktivität: {'[' + 'X' * tags + '.' * (max_tags - tags) + ']'} {tags}/{max_tags} Tags  →  Timeout {timeout}")
         print(f"  Trades:      {stats['total_trades']} ({stats['winning_trades']}W / {stats['losing_trades']}L)")
         print(f"  Win Rate:    {stats['win_rate']*100:.1f}%")
         print(f"  Total P&L:   {stats['total_pnl_eur']:+.2f} EUR")

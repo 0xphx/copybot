@@ -17,30 +17,42 @@ logger = logging.getLogger(__name__)
 
 class PaperTradingEngine:
     """Automatischer Paper Trading Bot"""
-    
+
     def __init__(
-        self, 
+        self,
         portfolio: PaperPortfolio,
         price_oracle: PriceOracle,
         polling_source=None,
         price_update_interval: int = 10,
-        stop_loss_percent: float = -50.0,    # -50% → automatischer Verkauf
-        take_profit_percent: float = 100.0,  # +100% → automatischer Verkauf
+        stop_loss_percent: float = -50.0,
+        take_profit_percent: float = 100.0,
+        wallet_tracker=None,   # Optional: für strategie-basierte SL/TP
     ):
         self.portfolio = portfolio
         self.oracle = price_oracle
         self.polling_source = polling_source
         self.price_update_interval = price_update_interval
-        self.stop_loss_percent = stop_loss_percent
-        self.take_profit_percent = take_profit_percent
-        
+        self.stop_loss_percent = stop_loss_percent    # globaler Fallback
+        self.take_profit_percent = take_profit_percent  # globaler Fallback
+        self.wallet_tracker = wallet_tracker
+
         # Tracking welche Wallets zu welchen Positionen gehören
         self.position_trigger_wallets: Dict[str, Set[str]] = {}
-        
+
+        # Strategie-basierte SL/TP pro Token
+        # token → (stop_loss_pct, take_profit_pct)
+        self.position_sl_tp: Dict[str, tuple] = {}
+
+        # Inaktivitäts-Tracking pro Token
+        # token → letzter Preis bei dem eine Änderung festgestellt wurde
+        self.position_last_changed_price: Dict[str, float] = {}
+        # token → Zeitpunkt der letzten Preisänderung
+        self.position_last_changed_time: Dict[str, float] = {}
+
         # Price Update Loop
         self.price_update_task = None
-        self.last_prices: Dict[str, float] = {}  # Token -> Last Price
-        
+        self.last_prices: Dict[str, float] = {}
+
         logger.info("[PaperTradingEngine] Initialized")
     
     async def on_buy_signal(self, signal: TradeSignal):
@@ -74,6 +86,23 @@ class PaperTradingEngine:
         if position:
             self.position_trigger_wallets[token] = set(signal.wallets)
             self.last_prices[token] = price_eur
+
+            # SL/TP aus Wallet-Strategie ableiten
+            if self.wallet_tracker:
+                sl, tp = self.wallet_tracker.get_sl_tp_for_wallets(signal.wallets)
+                logger.info(
+                    f"[TradingEngine] Strategy SL/TP for {token[:8]}...: "
+                    f"SL={sl:.0f}% TP=+{tp:.0f}% "
+                    f"(wallets: {[w[:8] for w in signal.wallets]})"
+                )
+            else:
+                sl, tp = self.stop_loss_percent, self.take_profit_percent
+            self.position_sl_tp[token] = (sl, tp)
+
+            # Inaktivitäts-Timer starten
+            import time
+            self.position_last_changed_price[token] = price_eur
+            self.position_last_changed_time[token]  = time.monotonic()
             
             if self.price_update_task is None or self.price_update_task.done():
                 self.price_update_task = asyncio.create_task(self._price_update_loop())
@@ -157,10 +186,24 @@ class PaperTradingEngine:
         )
         
         if trade_result:
+            # Tag-Abbau: nur wenn Close NICHT durch Inaktivität ausgelöst wurde
+            if reason != "INACTIVITY" and self.wallet_tracker:
+                trigger_wallets = list(self.position_trigger_wallets.get(token, set()))
+                for w in trigger_wallets:
+                    current_tags = self.wallet_tracker.get_inactivity_tags(w)
+                    if current_tags > 0:
+                        self.wallet_tracker.remove_inactivity_tag(w)
+
             if token in self.position_trigger_wallets:
                 del self.position_trigger_wallets[token]
             if token in self.last_prices:
                 del self.last_prices[token]
+            if token in self.position_sl_tp:
+                del self.position_sl_tp[token]
+            if token in self.position_last_changed_price:
+                del self.position_last_changed_price[token]
+            if token in self.position_last_changed_time:
+                del self.position_last_changed_time[token]
             
             if not self.portfolio.positions:
                 if self.polling_source:
@@ -217,32 +260,70 @@ class PaperTradingEngine:
                         )
                         
                         self.last_prices[token] = current_price
-                        
+
+                        import time
+
+                        # ─── INAKTIVITÄT ─────────────────────────────────────
+                        if current_price == self.position_last_changed_price.get(token):
+                            trigger_wallets = list(self.position_trigger_wallets.get(token, set()))
+                            timeout = (
+                                self.wallet_tracker.get_inactivity_timeout(trigger_wallets)
+                                if self.wallet_tracker else 600
+                            )
+                            inactive_secs = time.monotonic() - self.position_last_changed_time.get(token, time.monotonic())
+                            if inactive_secs >= timeout:
+                                logger.warning(
+                                    f"[Inactivity] ⏱️ {token[:8]}... no price change for "
+                                    f"{inactive_secs/60:.1f} min (limit {timeout//60} min) – closing"
+                                )
+                                # Tags auf alle Trigger-Wallets
+                                if self.wallet_tracker:
+                                    for w in trigger_wallets:
+                                        tags = self.wallet_tracker.add_inactivity_tag(w)
+                                        logger.info(f"[Inactivity] Tag {w[:8]}... → {tags} tag(s)")
+                                await self._close_position(
+                                    token=token,
+                                    price_eur=current_price,
+                                    reason="INACTIVITY",
+                                    trigger_label=f"Inactivity {inactive_secs/60:.1f} min (limit {timeout//60} min)"
+                                )
+                                continue
+                        else:
+                            # Preis hat sich geändert – Timer zurücksetzen
+                            self.position_last_changed_price[token] = current_price
+                            self.position_last_changed_time[token]  = time.monotonic()
+
+                        # SL/TP: positions-spezifisch oder globaler Fallback
+                        sl, tp = self.position_sl_tp.get(
+                            token,
+                            (self.stop_loss_percent, self.take_profit_percent)
+                        )
+
                         # ─── STOP-LOSS ────────────────────────────────────────
-                        if pnl_pct <= self.stop_loss_percent:
+                        if pnl_pct <= sl:
                             logger.warning(
                                 f"[StopLoss] 🛑 {token[:8]}... hit stop-loss "
-                                f"({pnl_pct:.1f}% ≤ {self.stop_loss_percent:.0f}%)"
+                                f"({pnl_pct:.1f}% <= {sl:.0f}%)"
                             )
                             await self._close_position(
                                 token=token,
                                 price_eur=current_price,
                                 reason="STOP_LOSS",
-                                trigger_label=f"Stop-Loss triggered @ {pnl_pct:.1f}%"
+                                trigger_label=f"Stop-Loss @ {pnl_pct:.1f}% (limit {sl:.0f}%)"
                             )
-                            continue  # Token aus Positionen entfernt, nächstes
-                        
+                            continue
+
                         # ─── TAKE-PROFIT ──────────────────────────────────────
-                        if pnl_pct >= self.take_profit_percent:
+                        if pnl_pct >= tp:
                             logger.info(
                                 f"[TakeProfit] 🎯 {token[:8]}... hit take-profit "
-                                f"({pnl_pct:.1f}% ≥ {self.take_profit_percent:.0f}%)"
+                                f"({pnl_pct:.1f}% >= +{tp:.0f}%)"
                             )
                             await self._close_position(
                                 token=token,
                                 price_eur=current_price,
                                 reason="TAKE_PROFIT",
-                                trigger_label=f"Take-Profit triggered @ {pnl_pct:.1f}%"
+                                trigger_label=f"Take-Profit @ +{pnl_pct:.1f}% (limit +{tp:.0f}%)"
                             )
                             continue
                     

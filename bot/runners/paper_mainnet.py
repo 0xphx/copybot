@@ -257,6 +257,7 @@ class PaperTradingMainnetRunner:
         
         # 5. Redundancy Engine (mit historischen Confidence Scores falls vorhanden)
         tracker = WalletTracker()
+        self.tracker = tracker
         self.redundancy = RedundancyEngine(
             time_window_seconds=self.config['time_window'],
             min_wallets=self.config['min_wallets'],
@@ -314,7 +315,8 @@ class PaperTradingMainnetRunner:
             polling_source=self.source,
             price_update_interval=self.config['price_update_interval'],
             stop_loss_percent=self.config['stop_loss'],
-            take_profit_percent=self.config['take_profit']
+            take_profit_percent=self.config['take_profit'],
+            wallet_tracker=tracker
         )
         
         # Signal Handler
@@ -497,21 +499,27 @@ class PaperTradingMainnetRunner:
                 return
             
             # Zeige BUY Signal Box
+            # Strategie-Labels und SL/TP für beteiligte Wallets
+            sl, tp = self.tracker.get_sl_tp_for_wallets(signal_obj.wallets)
+            wallet_labels = [
+                (w, self.tracker.get_strategy_label(w))
+                for w in signal_obj.wallets
+            ]
+
             print()
             print("="*70)
             print("🚨 STRONG BUY SIGNAL DETECTED!")
             print("="*70)
             print(f"Token:        {signal_obj.token[:15]}...")
-            print(f"Side:         {signal_obj.side}")
             print(f"Wallets:      {signal_obj.wallet_count} unique wallets")
-            print(f"Total Amount: {signal_obj.total_amount:.2f}")
-            print(f"Avg Amount:   {signal_obj.avg_amount:.2f}")
             print(f"Time Window:  {signal_obj.time_window_seconds:.1f} seconds")
             print(f"Confidence:   {signal_obj.confidence*100:.0f}%")
             print()
             print("Wallets involved:")
-            for wallet in signal_obj.wallets:
-                print(f"  - {wallet[:15]}...")
+            for w, label in wallet_labels:
+                print(f"  - {w[:20]}...  [{label}]")
+            print()
+            print(f"Strategy SL/TP: Stop-Loss {sl:.0f}%  |  Take-Profit +{tp:.0f}%")
             print("="*70)
             print()
             

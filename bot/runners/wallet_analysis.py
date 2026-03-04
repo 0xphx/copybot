@@ -140,6 +140,9 @@ class WalletAnalysisRunner:
         self.open_positions:    Dict[str, tuple] = {}
         self.price_fail_counts: Dict[str, int]   = {}
 
+        # Inaktivitäts-Tracking: token → (letzter_preis, monotonic_time)
+        self.inactivity_tracker: Dict[str, tuple] = {}
+
         self.active_token:   Optional[str]           = None
         self.active_account: Optional[WalletAccount] = None
         self.last_price:     float                   = 0.0
@@ -421,6 +424,10 @@ class WalletAnalysisRunner:
         self.price_fail_counts[token] = 0
         self.total_buys += 1
 
+        # Inaktivitäts-Timer starten
+        import time
+        self.inactivity_tracker[token] = (price_eur, time.monotonic())
+
         self.active_token   = token
         self.active_account = account
         self.last_price     = price_eur
@@ -497,7 +504,14 @@ class WalletAnalysisRunner:
 
         self.open_positions.pop(token, None)
         self.price_fail_counts.pop(token, None)
+        self.inactivity_tracker.pop(token, None)
         self.total_sells += 1
+
+        # Tag-Abbau: nur wenn Close NICHT durch Inaktivität ausgelöst wurde
+        if reason != "INACTIVITY":
+            current_tags = self.tracker.get_inactivity_tags(account.wallet)
+            if current_tags > 0:
+                self.tracker.remove_inactivity_tag(account.wallet)
 
         pnl_eur      = record['pnl_eur']
         pnl_pct      = record['pnl_percent']
@@ -606,12 +620,40 @@ class WalletAnalysisRunner:
 
                     self.open_positions[token] = (account, current_price)
 
+                    # ── Inaktivitäts-Tracking ────────────────────────────────
+                    import time
+                    last_changed_price, last_changed_time = self.inactivity_tracker.get(
+                        token, (current_price, time.monotonic())
+                    )
+                    if current_price != last_changed_price:
+                        self.inactivity_tracker[token] = (current_price, time.monotonic())
+                        last_changed_time = time.monotonic()
+
+                    timeout = self.tracker.get_inactivity_timeout([account.wallet])
+                    inactive_secs = time.monotonic() - last_changed_time
+
                     emoji = "📈" if pnl_eur > 0 else "📉" if pnl_eur < 0 else "➡️"
                     print(
                         f"{emoji} [PriceMonitor] {token[:8]}... @ {current_price:.8f} EUR "
                         f"| P&L: {pnl_eur:+.2f} EUR ({pnl_pct:+.2f}%) "
                         f"| Last {self.PRICE_UPDATE_INTERVAL}s: {change_pct:+.2f}%"
+                        + (f" | Inaktiv: {inactive_secs/60:.1f}/{timeout//60} Min" if inactive_secs > 30 else "")
                     )
+
+                    if inactive_secs >= timeout:
+                        logger.warning(
+                            f"[Inactivity] ⏱️ {token[:8]}... no price change for "
+                            f"{inactive_secs/60:.1f} min (limit {timeout//60} min) – closing"
+                        )
+                        tags = self.tracker.add_inactivity_tag(account.wallet)
+                        logger.info(f"[Inactivity] Tag {account.wallet[:8]}... → {tags}/3")
+                        await self._close_position(
+                            token=token, account=account,
+                            price_eur=current_price,
+                            reason="INACTIVITY",
+                            trigger_label=f"Inaktiv {inactive_secs/60:.1f} min (limit {timeout//60} min)"
+                        )
+                        continue
 
                     if pnl_pct <= self.STOP_LOSS_PERCENT:
                         logger.warning(
@@ -704,26 +746,32 @@ class WalletAnalysisRunner:
             sorted_accounts = sorted(active_accounts, key=lambda a: a.total_pnl_eur, reverse=True)
 
             # Spaltenbreiten Wallet-Übersicht
-            # Marker(1) + 2sp + Wallet(44+3) + Trades(6) + Win%(6) + P&L EUR(12) + Confidence(10)
-            print(f"  {'':1}  {'Wallet':<47} {'Trades':>6} {'Win%':>6} {'P&L EUR':>12} {'Confidence':>10}")
-            print("  " + "-"*86)
+            # Marker(1) + Wallet(47) + Trades(6) + Win%(6) + P&L EUR(12) + Confidence(10) + Strategy(12)
+            print(f"  {'':1}  {'Wallet':<47} {'Trades':>6} {'Win%':>6} {'P&L EUR':>12} {'Conf':>6} {'Strategy':<12}")
+            print("  " + "-"*98)
 
             for acc in sorted_accounts:
-                conf    = self.tracker.get_confidence(acc.wallet)
+                conf   = self.tracker.get_confidence(acc.wallet)
+                label  = self.tracker.get_strategy_label(acc.wallet)
                 pnl_str = f"{acc.total_pnl_eur:+.2f} EUR"
                 wr_str  = f"{acc.win_rate*100:.0f}%"
                 marker  = "+" if acc.total_pnl_eur > 0 else "-" if acc.total_pnl_eur < 0 else " "
                 wallet  = f"{acc.wallet[:44]}..."
+                sl, tp  = self.tracker.get_sl_tp_for_wallet(acc.wallet)
+                label_str = f"{label}"
+                if label != 'UNKNOWN':
+                    label_str += f" ({sl:.0f}/{tp:.0f})"
                 print(
                     f"  {marker}  {wallet:<47}"
                     f" {acc.num_trades:>5}x"
                     f" {wr_str:>6}"
                     f" {pnl_str:>12}"
-                    f" {conf:>10.2f}"
+                    f" {conf:>6.2f}"
+                    f" {label_str:<12}"
                 )
 
             total_pnl = sum(a.total_pnl_eur for a in active_accounts)
-            print("  " + "-"*86)
+            print("  " + "-"*98)
             print(f"     {'TOTAL':<47} {'':>6} {'':>6} {f'{total_pnl:+.2f} EUR':>12}")
 
             print()
