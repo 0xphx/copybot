@@ -39,19 +39,19 @@ class WalletStats:
     total_pnl_eur: float
     avg_pnl_eur: float
     win_rate: float
-    confidence_score: float   # 0.0 – 1.0
+    confidence_score: float   # 0.0  1.0
     last_updated: datetime
 
 
 # Strategie-spezifische SL/TP Defaults
 # Format: (stop_loss_pct, take_profit_pct)
 STRATEGY_SL_TP = {
-    'ASYMMETRIC':  (-35.0, 150.0),  # Große Gewinne, enge Verluste – früh raus bei Verlust
-    'RUNNER':      (-50.0, 175.0),  # Alles oder nichts – hoher TP, akzeptiert tiefe Verluste
-    'SCALPER':     (-20.0,  40.0),  # Schnelle kleine Gewinne – sehr enger SL
-    'LOSS_MAKER':  (-25.0,  50.0),  # Konservativ – schützt Kapital so gut wie möglich
+    'ASYMMETRIC':  (-35.0, 150.0),  # Große Gewinne, enge Verluste  früh raus bei Verlust
+    'RUNNER':      (-50.0, 175.0),  # Alles oder nichts  hoher TP, akzeptiert tiefe Verluste
+    'SCALPER':     (-20.0,  40.0),  # Schnelle kleine Gewinne  sehr enger SL
+    'LOSS_MAKER':  (-25.0,  50.0),  # Konservativ  schützt Kapital so gut wie möglich
     'MIXED':       (-50.0, 100.0),  # Globale Defaults
-    'UNKNOWN':     (-50.0, 100.0),  # Noch kein Label – globale Defaults
+    'UNKNOWN':     (-50.0, 100.0),  # Noch kein Label  globale Defaults
 }
 
 
@@ -66,16 +66,16 @@ class WalletTracker:
         - Minimum 5 Trades für echten Score, sonst 0.5 (neutral)
 
     Strategie-Label (ab 20 sauberen Trades):
-        ASYMMETRIC  – große Gewinne, begrenzte Verluste
-        RUNNER      – lässt Gewinne laufen, akzeptiert hohe Verluste
-        SCALPER     – konstante kleine Gewinne, enge Verluste
-        LOSS_MAKER  – überwiegend Verluste
-        MIXED       – kein klares Muster
-        UNKNOWN     – unter 20 saubere Trades
+        ASYMMETRIC   große Gewinne, begrenzte Verluste
+        RUNNER       lässt Gewinne laufen, akzeptiert hohe Verluste
+        SCALPER      konstante kleine Gewinne, enge Verluste
+        LOSS_MAKER   überwiegend Verluste
+        MIXED        kein klares Muster
+        UNKNOWN      unter 20 saubere Trades
     """
 
-    MIN_TRADES_FOR_SCORE = 5    # Unter diesem Wert → neutraler Score 0.5
-    MIN_TRADES_FOR_LABEL = 20   # Unter diesem Wert → UNKNOWN Label
+    MIN_TRADES_FOR_SCORE = 5    # Unter diesem Wert  neutraler Score 0.5
+    MIN_TRADES_FOR_LABEL = 20   # Unter diesem Wert  UNKNOWN Label
     
     def __init__(self, db_path: str = DB_PATH):
         self.db_path = db_path
@@ -247,13 +247,13 @@ class WalletTracker:
         else:
             import math
 
-            # 1. Win Rate: 0–45 Punkte
+            # 1. Win Rate: 045 Punkte
             wr_score = win_rate * 0.45
 
-            # 2. Trade Count: 0–20 Punkte, sättigt bei 50 Trades
+            # 2. Trade Count: 020 Punkte, sättigt bei 50 Trades
             count_score = min(total_trades / 50, 1.0) * 0.20
 
-            # 3. Avg P&L Score: 0–35 Punkte, relativ + logarithmisch
+            # 3. Avg P&L Score: 035 Punkte, relativ + logarithmisch
             #
             # Basis: Positionsgröße = CAPITAL_PER_WALLET * POSITION_SIZE
             #        = 1000 EUR * 20% = 200 EUR
@@ -261,24 +261,24 @@ class WalletTracker:
             # Formel: log2(1 + max(avg_pnl_pct, 0) / 25) / log2(21) * 0.20
             #
             # Beispiele:
-            #   avg_pnl_pct =   0% → 0.00
-            #   avg_pnl_pct = +25% → 0.05
-            #   avg_pnl_pct = +50% → 0.08
-            #   avg_pnl_pct = +100% → 0.11
-            #   avg_pnl_pct = +200% → 0.14
-            #   avg_pnl_pct = +500% → 0.18  (praktisch Maximum)
+            #   avg_pnl_pct =   0%  0.00
+            #   avg_pnl_pct = +25%  0.05
+            #   avg_pnl_pct = +50%  0.08
+            #   avg_pnl_pct = +100%  0.11
+            #   avg_pnl_pct = +200%  0.14
+            #   avg_pnl_pct = +500%  0.18  (praktisch Maximum)
             #
-            # Verluste geben 0 Punkte (kein negativer Einfluss – Win Rate bestraft bereits)
+            # Verluste geben 0 Punkte (kein negativer Einfluss  Win Rate bestraft bereits)
             position_size_eur = 200.0  # 1000 EUR * 20%
-            avg_pnl_pct = (avg_pnl / position_size_eur) * 100  # z.B. +25 EUR → +12.5%
-            avg_pnl_pct_pos = max(avg_pnl_pct, 0.0)            # Verluste → 0
+            avg_pnl_pct = (avg_pnl / position_size_eur) * 100  # z.B. +25 EUR  +12.5%
+            avg_pnl_pct_pos = max(avg_pnl_pct, 0.0)            # Verluste  0
             pnl_score = (math.log2(1 + avg_pnl_pct_pos / 25) / math.log2(21)) * 0.35
             pnl_score = min(pnl_score, 0.35)                   # Hard cap bei 35 Punkten
 
             confidence = round(wr_score + count_score + pnl_score, 4)
             confidence = max(0.0, min(1.0, confidence))
 
-        # ── Strategie-Label ─────────────────────────────────────────────────
+        #  Strategie-Label 
         strategy_label = self._calculate_strategy_label(wallet, conn)
 
         cursor.execute("""
@@ -308,7 +308,7 @@ class WalletTracker:
         
         avg_pnl_pct_display = (avg_pnl / 200.0) * 100
         logger.debug(
-            f"[WalletTracker] {wallet[:8]}... → "
+            f"[WalletTracker] {wallet[:8]}...  "
             f"confidence={confidence:.2f} | win_rate={win_rate:.0%} | "
             f"trades={total_trades} | avg_pnl={avg_pnl:+.2f} EUR ({avg_pnl_pct_display:+.1f}% of position)"
         )
@@ -348,16 +348,16 @@ class WalletTracker:
         gross_loss   = abs(sum(t['pnl_eur'] for t in trades if t['pnl_eur'] < 0))
         profit_factor = gross_profit / gross_loss if gross_loss > 0 else 999.0
 
-        # ── Klassifizierung ─────────────────────────────────────────────────
+        #  Klassifizierung 
         if win_rate < 0.15:
             label = 'LOSS_MAKER'
 
         elif avg_win > 80 and abs(avg_loss) < 45 and profit_factor >= 1.0:
-            # Große Gewinne, begrenzte Verluste – ideal
+            # Große Gewinne, begrenzte Verluste  ideal
             label = 'ASYMMETRIC'
 
         elif avg_win > 80 and abs(avg_loss) >= 45:
-            # Große Gewinne UND große Verluste – lässt alles laufen
+            # Große Gewinne UND große Verluste  lässt alles laufen
             label = 'RUNNER'
 
         elif avg_win <= 50 and abs(avg_loss) <= 25 and win_rate >= 0.50:
@@ -483,7 +483,7 @@ class WalletTracker:
         conn.close()
         return [dict(r) for r in rows]
     
-    # ── Inaktivitäts-Tag System ────────────────────────────────────────────
+    #  Inaktivitäts-Tag System 
 
     INACTIVITY_TIMEOUT_DEFAULT = 600   # 10 Minuten in Sekunden
     INACTIVITY_TIMEOUT_PENALIZED = 300  # 5 Minuten bei 3 Tags
@@ -492,7 +492,7 @@ class WalletTracker:
     def get_inactivity_timeout(self, wallets: list) -> int:
         """
         Gibt den Inaktivitäts-Timeout für eine Liste von Wallets zurück.
-        Wenn mind. ein Wallet 3 Tags hat → 5 Min, sonst 10 Min.
+        Wenn mind. ein Wallet 3 Tags hat  5 Min, sonst 10 Min.
         """
         conn = self._connect()
         cursor = conn.cursor()
@@ -526,7 +526,7 @@ class WalletTracker:
         new_tags = cursor.fetchone()['tags']
         conn.commit()
         conn.close()
-        logger.info(f"[WalletTracker] {wallet[:8]}... inactivity tag +1 → {new_tags}/{self.INACTIVITY_MAX_TAGS}")
+        logger.info(f"[WalletTracker] {wallet[:8]}... inactivity tag +1  {new_tags}/{self.INACTIVITY_MAX_TAGS}")
         return new_tags
 
     def remove_inactivity_tag(self, wallet: str) -> int:
@@ -547,7 +547,7 @@ class WalletTracker:
         conn.commit()
         conn.close()
         if new_tags >= 0:
-            logger.info(f"[WalletTracker] {wallet[:8]}... inactivity tag -1 → {new_tags}/{self.INACTIVITY_MAX_TAGS}")
+            logger.info(f"[WalletTracker] {wallet[:8]}... inactivity tag -1  {new_tags}/{self.INACTIVITY_MAX_TAGS}")
         return new_tags
 
     def get_inactivity_tags(self, wallet: str) -> int:

@@ -13,18 +13,18 @@ logger = logging.getLogger(__name__)
 class ConnectionHealthMonitor:
     """
     Überwacht die Netzwerkverbindung zum RPC Endpoint
-    Bei Ausfall → Emergency Exit aller Positionen
+    Bei Ausfall  Emergency Exit aller Positionen
     """
     
     def __init__(
         self,
         emergency_callback: Callable,
-        failure_threshold_seconds: int = 30,  # Nach 30s kontinuierlichen Errors → Emergency
+        failure_threshold_seconds: int = 30,  # Nach 30s kontinuierlichen Errors  Emergency
         check_interval: float = 5.0,  # Alle 5s Status prüfen
-        reconnect_callback: Optional[Callable] = None,  # 🔄 NEU: Callback bei Reconnect
+        reconnect_callback: Optional[Callable] = None,  #  NEU: Callback bei Reconnect
     ):
         self.emergency_callback = emergency_callback
-        self.reconnect_callback = reconnect_callback  # 🔄 NEU
+        self.reconnect_callback = reconnect_callback  #  NEU
         self.failure_threshold = timedelta(seconds=failure_threshold_seconds)
         self.check_interval = check_interval
         
@@ -36,7 +36,7 @@ class ConnectionHealthMonitor:
         self.emergency_triggered = False
         self.running = False
         
-        # 📊 Zähle Anzahl der Verbindungsabbrüche
+        #  Zähle Anzahl der Verbindungsabbrüche
         self.total_disconnections = 0
         
         logger.info(
@@ -47,20 +47,20 @@ class ConnectionHealthMonitor:
             logger.info(f"[ConnectionMonitor] Reconnect callback enabled")
     
     def record_success(self):
-        """Erfolgreiches RPC Request → Reset Fehler-Counter"""
+        """Erfolgreiches RPC Request  Reset Fehler-Counter"""
         now = datetime.now()
         
         # War vorher disconnected?
         if not self.is_connected:
             duration = (now - self.last_failure).total_seconds() if self.last_failure else 0
             logger.info(
-                f"[ConnectionMonitor] ✅ CONNECTION RESTORED "
+                f"[ConnectionMonitor]  CONNECTION RESTORED "
                 f"(offline for {duration:.1f}s)"
             )
             
-            # 🔄 NEU: Trigger Reconnect Callback
+            #  NEU: Trigger Reconnect Callback
             if self.reconnect_callback and not self.emergency_triggered:
-                logger.info(f"[ConnectionMonitor] 🔍 Checking for missed SELLs...")
+                logger.info(f"[ConnectionMonitor]  Checking for missed SELLs...")
                 try:
                     if asyncio.iscoroutinefunction(self.reconnect_callback):
                         asyncio.create_task(self.reconnect_callback())
@@ -74,16 +74,16 @@ class ConnectionHealthMonitor:
         self.is_connected = True
     
     def record_failure(self):
-        """Fehlgeschlagenes RPC Request → Zähle Fehler"""
+        """Fehlgeschlagenes RPC Request  Zähle Fehler"""
         now = datetime.now()
         self.last_failure = now
         self.consecutive_failures += 1
         
-        # Bei erstem Fehler nach Success → NEUER Verbindungsabbruch!
+        # Bei erstem Fehler nach Success  NEUER Verbindungsabbruch!
         if self.is_connected:
             self.total_disconnections += 1
             logger.warning(
-                f"[ConnectionMonitor] ⚠️  CONNECTION ISSUE DETECTED "
+                f"[ConnectionMonitor]   CONNECTION ISSUE DETECTED "
                 f"(disconnection #{self.total_disconnections})"
             )
             self.is_connected = False
@@ -118,12 +118,12 @@ class ConnectionHealthMonitor:
                 # Threshold überschritten?
                 if offline_duration > self.failure_threshold:
                     logger.error(
-                        f"[ConnectionMonitor] 🚨 CRITICAL: Connection lost for "
+                        f"[ConnectionMonitor]  CRITICAL: Connection lost for "
                         f"{offline_duration.total_seconds():.1f}s "
                         f"(threshold: {self.failure_threshold.total_seconds()}s)"
                     )
                     logger.error(
-                        f"[ConnectionMonitor] 🛑 TRIGGERING EMERGENCY EXIT"
+                        f"[ConnectionMonitor]  TRIGGERING EMERGENCY EXIT"
                     )
                     
                     self.emergency_triggered = True
@@ -141,7 +141,7 @@ class ConnectionHealthMonitor:
                     # Noch innerhalb Threshold - warne aber
                     remaining = self.failure_threshold - offline_duration
                     logger.warning(
-                        f"[ConnectionMonitor] ⏳ Offline for {offline_duration.total_seconds():.1f}s "
+                        f"[ConnectionMonitor]  Offline for {offline_duration.total_seconds():.1f}s "
                         f"(emergency in {remaining.total_seconds():.1f}s)"
                     )
         

@@ -61,7 +61,7 @@ class RealisticMockOracle:
     async def get_price_eur(self, token_address: str) -> Optional[float]:
         """Holt realistischen Preis mit Schwankungen"""
         
-        # Neues Token → Initialisiere
+        # Neues Token  Initialisiere
         if token_address not in self.prices:
             self._initialize_token(token_address)
         
@@ -144,10 +144,10 @@ class RealisticMockOracle:
         # Log bei signifikanter Änderung
         change_pct = ((new_price - current_price) / current_price) * 100
         if abs(change_pct) >= 5:
-            emoji = "📈" if change_pct > 0 else "📉"
+            emoji = "" if change_pct > 0 else ""
             logger.info(
                 f"[RealisticMockOracle] {emoji} {token_address[:8]}... "
-                f"{current_price:.6f} → {new_price:.6f} EUR ({change_pct:+.2f}%)"
+                f"{current_price:.6f}  {new_price:.6f} EUR ({change_pct:+.2f}%)"
             )
     
     async def get_multiple_prices(self, token_addresses: list) -> Dict[str, float]:
@@ -189,7 +189,7 @@ class RealisticMockOracle:
     def print_all_stats(self):
         """Zeigt Stats für alle Tokens"""
         print("\n" + "="*70)
-        print("📊 TOKEN PRICE STATISTICS")
+        print(" TOKEN PRICE STATISTICS")
         print("="*70)
         
         for token in sorted(self.prices.keys()):
@@ -197,7 +197,7 @@ class RealisticMockOracle:
             if not stats:
                 continue
             
-            emoji = "📈" if stats["change_percent"] > 0 else "📉"
+            emoji = "" if stats["change_percent"] > 0 else ""
             print(f"\n{emoji} {token[:12]}... ({stats['template']})")
             print(f"   Current:  {stats['current']:.6f} EUR")
             print(f"   Start:    {stats['start']:.6f} EUR")

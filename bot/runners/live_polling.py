@@ -36,7 +36,7 @@ def handle_signal(signal: TradeSignal):
     """
     print()
     print("=" * 70)
-    print(f"🚨 STRONG {signal.side} SIGNAL DETECTED!")
+    print(f" STRONG {signal.side} SIGNAL DETECTED!")
     print("=" * 70)
     print(f"Token:        {signal.token}")
     print(f"Side:         {signal.side}")
@@ -89,7 +89,7 @@ async def run_live_polling(network: str = NETWORK_DEVNET):
     redundancy_engine.on_signal = handle_signal
     
     print()
-    print("🧠 [Redundancy Engine] Activated")
+    print(" [Redundancy Engine] Activated")
     print(f"   Time Window: 30 seconds")
     print(f"   Min Wallets: 2")
     print(f"   Min Confidence: 50%")
@@ -106,7 +106,7 @@ async def run_live_polling(network: str = NETWORK_DEVNET):
     print(f"[Live Polling] Listening with {len(wallet_addresses)} wallets")
     print(f"[Live Polling] Poll interval: 2 seconds")
     print()
-    print("💡 Bot will alert when 2+ wallets buy the same token!")
+    print(" Bot will alert when 2+ wallets buy the same token!")
     print("Press CTRL+C to stop")
     print()
     

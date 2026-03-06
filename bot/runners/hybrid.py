@@ -17,9 +17,9 @@ async def handle_trade(event):
     """Trade Handler mit Source Indicator"""
     # Farbige Ausgabe je nach Source
     if event.source == "mainnet_real":
-        prefix = "🟢 [REAL]"
+        prefix = " [REAL]"
     elif event.source == "hybrid_fake":
-        prefix = "🔵 [FAKE]"
+        prefix = " [FAKE]"
     else:
         prefix = "[Trade]"
     
@@ -37,7 +37,7 @@ def handle_signal(signal: TradeSignal):
     """Handler für erkannte Signals"""
     print()
     print("=" * 70)
-    print(f"🚨 STRONG {signal.side} SIGNAL DETECTED!")
+    print(f" STRONG {signal.side} SIGNAL DETECTED!")
     print("=" * 70)
     print(f"Token:        {signal.token[:12]}...")
     print(f"Side:         {signal.side}")
@@ -59,7 +59,7 @@ async def run_hybrid(network: str = NETWORK_MAINNET):
     global redundancy_engine
     
     print("=" * 60)
-    print("🔀 HYBRID MODE - Mainnet + Fake Trades")
+    print(" HYBRID MODE - Mainnet + Fake Trades")
     print("=" * 60)
     print_network_info(network)
     print("=" * 60)
@@ -69,8 +69,8 @@ async def run_hybrid(network: str = NETWORK_MAINNET):
     wallet_addresses = [w.wallet for w in active_wallets]
     
     if not wallet_addresses:
-        print("\n⚠️  WARNING: No active wallets found!")
-        print("💡 Run: python main.py import")
+        print("\n  WARNING: No active wallets found!")
+        print(" Run: python main.py import")
         return
     
     print(f"[WalletSync] Active wallets: {len(wallet_addresses)}")
@@ -87,7 +87,7 @@ async def run_hybrid(network: str = NETWORK_MAINNET):
     redundancy_engine.on_signal = handle_signal
     
     print()
-    print("🧠 [Redundancy Engine] Activated")
+    print(" [Redundancy Engine] Activated")
     print(f"   Time Window: 30 seconds")
     print(f"   Min Wallets: 2")
     print(f"   Min Confidence: 50%")
@@ -107,10 +107,10 @@ async def run_hybrid(network: str = NETWORK_MAINNET):
     print(f"[Hybrid] Real polling every 2 seconds")
     print(f"[Hybrid] Fake pattern every 20 seconds")
     print()
-    print("🟢 = Real Mainnet Trade")
-    print("🔵 = Injected Fake Trade")
+    print(" = Real Mainnet Trade")
+    print(" = Injected Fake Trade")
     print()
-    print("💡 Watch for 🚨 SIGNAL alerts!")
+    print(" Watch for  SIGNAL alerts!")
     print("Press CTRL+C to stop")
     print()
     

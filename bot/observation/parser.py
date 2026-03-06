@@ -16,7 +16,7 @@ def parse_helius_swap(event: dict) -> TradeEvent | None:
     token_out = event["swap"]["tokenOutputs"][0]
 
     # Heuristik:
-    # Wenn SOL ausgegeben wird → Buy
+    # Wenn SOL ausgegeben wird  Buy
     side = "buy" if token_in["mint"] == "So11111111111111111111111111111111111111112" else "sell"
 
     return TradeEvent(

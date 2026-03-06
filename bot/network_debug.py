@@ -80,7 +80,7 @@ print("\n[5] Detailed WebSocket Connection Test")
 async def detailed_ws_test(url, name):
     print(f"\n   Testing {name}: {url}")
     try:
-        print(f"   → Connecting... ", end="", flush=True)
+        print(f"    Connecting... ", end="", flush=True)
         
         import websockets
         
@@ -94,12 +94,12 @@ async def detailed_ws_test(url, name):
         try:
             print("[OK] CONNECTED")
             
-            print(f"   → Sending ping... ", end="", flush=True)
+            print(f"    Sending ping... ", end="", flush=True)
             pong_waiter = await ws.ping()
             await asyncio.wait_for(pong_waiter, timeout=5)
             print("[OK] PONG RECEIVED")
             
-            print(f"   → Testing JSON-RPC... ", end="", flush=True)
+            print(f"    Testing JSON-RPC... ", end="", flush=True)
             test_payload = {
                 "jsonrpc": "2.0",
                 "id": 1,
@@ -191,8 +191,8 @@ print("\n[INFO] RECOMMENDED NEXT STEPS:")
 if any(results.values()):
     print("\n   [SUCCESS] SUCCESS! Your system can connect to Solana!")
     print("\n   Try these commands:")
-    print("   → python main.py test_network")
-    print("   → python main.py live_rpc devnet")
+    print("    python main.py test_network")
+    print("    python main.py live_rpc devnet")
 else:
     print("\n   Since firewall is already disabled, try:")
     print("   1. Temporarily disable antivirus")

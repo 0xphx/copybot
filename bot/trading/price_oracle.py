@@ -1,7 +1,7 @@
 """
 Price Oracle - Holt Token Preise in EUR
-Waterfall: DexScreener → Birdeye → CoinGecko
-Jupiter v2 / Lite wurden entfernt (erfordern API Key → HTTP 401/404)
+Waterfall: DexScreener  Birdeye  CoinGecko
+Jupiter v2 / Lite wurden entfernt (erfordern API Key  HTTP 401/404)
 """
 import aiohttp
 import logging
@@ -36,7 +36,7 @@ class PriceOracle:
     async def get_price_eur(self, token_address: str, skip_cache: bool = False) -> Optional[float]:
         """
         Holt Preis in EUR für Token.
-        Gibt None zurück wenn kein echter Preis gefunden wurde – kein Mock-Fallback.
+        Gibt None zurück wenn kein echter Preis gefunden wurde  kein Mock-Fallback.
         """
         # Cache check
         if not skip_cache and token_address in self.cache:
@@ -56,9 +56,9 @@ class PriceOracle:
             if price is not None:
                 self.cache[token_address] = price
                 return price
-            logger.warning(f"[PriceOracle] ❌ {name} → no price for {token_address[:8]}...")
+            logger.warning(f"[PriceOracle]  {name}  no price for {token_address[:8]}...")
 
-        logger.warning(f"[PriceOracle] ⚠️  All sources failed for {token_address[:8]}... – skipping (no mock)")
+        logger.warning(f"[PriceOracle]   All sources failed for {token_address[:8]}...  skipping (no mock)")
         self.miss_count += 1
         return None
 
@@ -96,7 +96,7 @@ class PriceOracle:
                     return None
 
                 price_eur = price_usd * 0.92
-                logger.info(f"[PriceOracle] ✅ DexScreener: {token_address[:8]}... = {price_eur:.8f} EUR (${price_usd:.8f})")
+                logger.info(f"[PriceOracle]  DexScreener: {token_address[:8]}... = {price_eur:.8f} EUR (${price_usd:.8f})")
                 return price_eur
                 
         except Exception as e:
@@ -132,7 +132,7 @@ class PriceOracle:
                     return None
 
                 price_eur = price_usd * 0.92
-                logger.info(f"[PriceOracle] ✅ Birdeye: {token_address[:8]}... = {price_eur:.8f} EUR")
+                logger.info(f"[PriceOracle]  Birdeye: {token_address[:8]}... = {price_eur:.8f} EUR")
                 return price_eur
                 
         except Exception as e:
@@ -159,7 +159,7 @@ class PriceOracle:
                     return None
                 
                 price_eur = float(data[coin_id]["eur"])
-                logger.info(f"[PriceOracle] ✅ CoinGecko: {token_address[:8]}... = {price_eur:.6f} EUR")
+                logger.info(f"[PriceOracle]  CoinGecko: {token_address[:8]}... = {price_eur:.6f} EUR")
                 return price_eur
                 
         except Exception as e:
@@ -188,7 +188,7 @@ class PriceOracle:
     
     def print_all_stats(self):
         """Gibt Statistiken aus"""
-        print("📊 Price Oracle Statistics:")
+        print(" Price Oracle Statistics:")
         print(f"   Total Fetches:    {self.fetch_count}")
         print(f"   Cache Hits:       {self.hit_count}")
         print(f"   API Misses:       {self.miss_count}")

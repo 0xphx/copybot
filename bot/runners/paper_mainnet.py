@@ -1,7 +1,7 @@
 """
 Paper Trading Runner - PURE MAINNET (Keine Fake Trades)
 Nur echte Mainnet Trades für realistische Tests
-🛡️ MIT CONNECTION HEALTH MONITORING + HYBRID APPROACH
+ MIT CONNECTION HEALTH MONITORING + HYBRID APPROACH
 """
 import asyncio
 import signal
@@ -55,12 +55,12 @@ class PaperTradingMainnetRunner:
     
     def _get_config_from_user(self):
         """
-        🎛️ INTERACTIVE SETUP
+         INTERACTIVE SETUP
         Fragt Benutzer nach Konfiguration
         """
         print()
         print("="*70)
-        print("⚙️  BOT CONFIGURATION")
+        print("  BOT CONFIGURATION")
         print("="*70)
         print()
         print("Drücke ENTER für Standardwerte")
@@ -68,170 +68,170 @@ class PaperTradingMainnetRunner:
         
         # 1. Initial Capital
         while True:
-            capital_input = input("💰 Initial Capital (EUR) [1000]: ").strip()
+            capital_input = input(" Initial Capital (EUR) [1000]: ").strip()
             if not capital_input:
                 self.config['initial_capital'] = 1000.0
                 break
             try:
                 capital = float(capital_input)
                 if capital <= 0:
-                    print("   ❌ Muss größer als 0 sein!")
+                    print("    Muss größer als 0 sein!")
                     continue
                 self.config['initial_capital'] = capital
                 break
             except ValueError:
-                print("   ❌ Bitte eine Zahl eingeben!")
+                print("    Bitte eine Zahl eingeben!")
         
         # 2. Position Size
         while True:
-            size_input = input("📊 Position Size (%) [20]: ").strip()
+            size_input = input(" Position Size (%) [20]: ").strip()
             if not size_input:
                 self.config['position_size'] = 0.20
                 break
             try:
                 size = float(size_input)
                 if size <= 0 or size > 100:
-                    print("   ❌ Muss zwischen 0 und 100 sein!")
+                    print("    Muss zwischen 0 und 100 sein!")
                     continue
                 self.config['position_size'] = size / 100
                 break
             except ValueError:
-                print("   ❌ Bitte eine Zahl eingeben!")
+                print("    Bitte eine Zahl eingeben!")
         
         # 3. Redundancy: Time Window
         while True:
-            window_input = input("⏱️  Time Window (Sekunden) [30]: ").strip()
+            window_input = input("  Time Window (Sekunden) [30]: ").strip()
             if not window_input:
                 self.config['time_window'] = 30
                 break
             try:
                 window = int(window_input)
                 if window <= 0:
-                    print("   ❌ Muss größer als 0 sein!")
+                    print("    Muss größer als 0 sein!")
                     continue
                 self.config['time_window'] = window
                 break
             except ValueError:
-                print("   ❌ Bitte eine ganze Zahl eingeben!")
+                print("    Bitte eine ganze Zahl eingeben!")
         
         # 4. Redundancy: Min Wallets
         while True:
-            wallets_input = input("👥 Min Wallets für Signal [2]: ").strip()
+            wallets_input = input(" Min Wallets für Signal [2]: ").strip()
             if not wallets_input:
                 self.config['min_wallets'] = 2
                 break
             try:
                 wallets = int(wallets_input)
                 if wallets <= 0:
-                    print("   ❌ Muss größer als 0 sein!")
+                    print("    Muss größer als 0 sein!")
                     continue
                 self.config['min_wallets'] = wallets
                 break
             except ValueError:
-                print("   ❌ Bitte eine ganze Zahl eingeben!")
+                print("    Bitte eine ganze Zahl eingeben!")
         
         # 5. Redundancy: Min Confidence
         while True:
-            conf_input = input("🎯 Min Confidence (%) [50]: ").strip()
+            conf_input = input(" Min Confidence (%) [50]: ").strip()
             if not conf_input:
                 self.config['min_confidence'] = 0.5
                 break
             try:
                 conf = float(conf_input)
                 if conf <= 0 or conf > 100:
-                    print("   ❌ Muss zwischen 0 und 100 sein!")
+                    print("    Muss zwischen 0 und 100 sein!")
                     continue
                 self.config['min_confidence'] = conf / 100
                 break
             except ValueError:
-                print("   ❌ Bitte eine Zahl eingeben!")
+                print("    Bitte eine Zahl eingeben!")
         
         # 6. Connection Monitor: Failure Threshold
         while True:
-            threshold_input = input("🛡️  Connection Timeout (Sekunden) [30]: ").strip()
+            threshold_input = input("  Connection Timeout (Sekunden) [30]: ").strip()
             if not threshold_input:
                 self.config['failure_threshold'] = 30
                 break
             try:
                 threshold = int(threshold_input)
                 if threshold <= 0:
-                    print("   ❌ Muss größer als 0 sein!")
+                    print("    Muss größer als 0 sein!")
                     continue
                 self.config['failure_threshold'] = threshold
                 break
             except ValueError:
-                print("   ❌ Bitte eine ganze Zahl eingeben!")
+                print("    Bitte eine ganze Zahl eingeben!")
         
         # 7. Price Update Interval
         while True:
-            interval_input = input("📈 Price Update Interval (Sekunden) [10]: ").strip()
+            interval_input = input(" Price Update Interval (Sekunden) [10]: ").strip()
             if not interval_input:
                 self.config['price_update_interval'] = 10
                 break
             try:
                 interval = int(interval_input)
                 if interval <= 0:
-                    print("   ❌ Muss größer als 0 sein!")
+                    print("    Muss größer als 0 sein!")
                     continue
                 self.config['price_update_interval'] = interval
                 break
             except ValueError:
-                print("   ❌ Bitte eine ganze Zahl eingeben!")
+                print("    Bitte eine ganze Zahl eingeben!")
         
         # 8. Stop-Loss
         while True:
-            sl_input = input("🛑 Stop-Loss (%) [-50]: ").strip()
+            sl_input = input(" Stop-Loss (%) [-50]: ").strip()
             if not sl_input:
                 self.config['stop_loss'] = -50.0
                 break
             try:
                 sl = float(sl_input.lstrip('-'))
                 if sl <= 0 or sl >= 100:
-                    print("   ❌ Muss zwischen 0 und 100 sein (z.B. 15 für -15%)!")
+                    print("    Muss zwischen 0 und 100 sein (z.B. 15 für -15%)!")
                     continue
                 self.config['stop_loss'] = -sl
                 break
             except ValueError:
-                print("   ❌ Bitte eine Zahl eingeben (z.B. 15)!")
+                print("    Bitte eine Zahl eingeben (z.B. 15)!")
         
         # 9. Take-Profit
         while True:
-            tp_input = input("🎯 Take-Profit (%) [100]: ").strip()
+            tp_input = input(" Take-Profit (%) [100]: ").strip()
             if not tp_input:
                 self.config['take_profit'] = 100.0
                 break
             try:
                 tp = float(tp_input.lstrip('+'))
                 if tp <= 0:
-                    print("   ❌ Muss größer als 0 sein!")
+                    print("    Muss größer als 0 sein!")
                     continue
                 self.config['take_profit'] = tp
                 break
             except ValueError:
-                print("   ❌ Bitte eine Zahl eingeben (z.B. 50)!")
+                print("    Bitte eine Zahl eingeben (z.B. 50)!")
         
         print()
         print("="*70)
-        print("✅ Konfiguration abgeschlossen!")
+        print(" Konfiguration abgeschlossen!")
         print("="*70)
     
     async def run(self):
         """Hauptloop"""
         
-        # 🎛️ Setup: Hole Konfiguration vom Benutzer
+        #  Setup: Hole Konfiguration vom Benutzer
         self._get_config_from_user()
         
         print()
         print("="*70)
-        print("📊 PAPER TRADING MODE - PURE MAINNET (No Fake Trades)")
-        print("🛡️  WITH CONNECTION HEALTH MONITORING + HYBRID APPROACH")
+        print(" PAPER TRADING MODE - PURE MAINNET (No Fake Trades)")
+        print("  WITH CONNECTION HEALTH MONITORING + HYBRID APPROACH")
         print("="*70)
         print()
         
         # 1. Wallets laden
         active_wallets = sync_wallets()
         if not active_wallets:
-            logger.error("❌ No active wallets found!")
+            logger.error(" No active wallets found!")
             return
         
         wallet_addresses = [w.wallet for w in active_wallets]
@@ -247,7 +247,7 @@ class PaperTradingMainnetRunner:
         # 3. Price Oracle
         self.oracle = PriceOracle()
         
-        # 4. 🛡️ Connection Health Monitor
+        # 4.  Connection Health Monitor
         self.connection_monitor = ConnectionHealthMonitor(
             emergency_callback=self._emergency_close_all_positions,
             reconnect_callback=self._check_for_missed_sells,
@@ -269,32 +269,32 @@ class PaperTradingMainnetRunner:
         self.redundancy.on_signal = self._handle_signal
         
         print()
-        print("🧠 [Trading Engine] Activated")
+        print(" [Trading Engine] Activated")
         print(f"   Initial Capital: {self.config['initial_capital']:.2f} EUR")
         print(f"   Position Size: {self.config['position_size']*100:.0f}%")
         print(f"   Strategy: Follow lead wallets")
         print()
         
-        print("🧠 [Redundancy Engine] Activated")
+        print(" [Redundancy Engine] Activated")
         print(f"   Time Window: {self.config['time_window']} seconds")
         print(f"   Min Wallets: {self.config['min_wallets']}")
         print(f"   Min Confidence: {self.config['min_confidence']*100:.0f}%")
         print()
         
-        print("🛡️  [Connection Monitor] Activated")
+        print("  [Connection Monitor] Activated")
         print(f"   Failure Threshold: {self.config['failure_threshold']} seconds")
         print(f"   Check Interval: 5 seconds")
         print(f"   Emergency Action: Close all positions")
         print(f"   Reconnect Action: Check for missed SELLs")
         print()
         
-        print("📈 [Price Monitor] Activated")
+        print(" [Price Monitor] Activated")
         print(f"   Update Interval: {self.config['price_update_interval']} seconds")
         print(f"   Stop-Loss:       {self.config['stop_loss']:.0f}%")
         print(f"   Take-Profit:     +{self.config['take_profit']:.0f}%")
         print()
         
-        print("🌐 [Mode] PURE MAINNET - No fake trades")
+        print(" [Mode] PURE MAINNET - No fake trades")
         print("   Watching real Solana transactions only")
         print()
         
@@ -325,7 +325,7 @@ class PaperTradingMainnetRunner:
         self.running = True
         self.start_time = datetime.now()
         
-        print("⏳ Waiting for real trades on Mainnet...")
+        print(" Waiting for real trades on Mainnet...")
         print("   (This might take a while if wallets are not active)")
         print()
         
@@ -337,10 +337,10 @@ class PaperTradingMainnetRunner:
             await self._shutdown()
     
     async def _emergency_close_all_positions(self):
-        """🛡️ EMERGENCY EXIT - Verbindung verloren"""
+        """ EMERGENCY EXIT - Verbindung verloren"""
         print()
         print("="*70)
-        print("🚨 EMERGENCY: CONNECTION LOST - CLOSING ALL POSITIONS!")
+        print(" EMERGENCY: CONNECTION LOST - CLOSING ALL POSITIONS!")
         print("="*70)
         
         if not self.portfolio or not self.portfolio.positions:
@@ -356,15 +356,15 @@ class PaperTradingMainnetRunner:
                 price_eur=entry_price,
                 reason="EMERGENCY_EXIT_CONNECTION_LOST"
             )
-            print(f"   ❌ Force closed {token[:8]}... @ {entry_price:.4f} EUR (break-even)")
+            print(f"    Force closed {token[:8]}... @ {entry_price:.4f} EUR (break-even)")
             positions_closed += 1
         
-        print(f"\n✅ Emergency exit completed ({positions_closed} positions closed)")
+        print(f"\n Emergency exit completed ({positions_closed} positions closed)")
         print("="*70)
         print()
     
     async def _check_for_missed_sells(self):
-        """🔄 RECONNECT CALLBACK - Prüft verpasste SELLs"""
+        """ RECONNECT CALLBACK - Prüft verpasste SELLs"""
         if not self.portfolio or not self.portfolio.positions:
             logger.info("[MissedSells] No open positions to check")
             return
@@ -438,9 +438,9 @@ class PaperTradingMainnetRunner:
                     continue
         
         if missed_sells_found > 0:
-            logger.info(f"[MissedSells] ✅ Found and processed {missed_sells_found} missed SELL(s)")
+            logger.info(f"[MissedSells]  Found and processed {missed_sells_found} missed SELL(s)")
         else:
-            logger.info(f"[MissedSells] ✅ No missed SELLs detected")
+            logger.info(f"[MissedSells]  No missed SELLs detected")
     
     async def _handle_trade(self, trade: TradeEvent):
         """
@@ -450,17 +450,17 @@ class PaperTradingMainnetRunner:
         Der Fast-Mode-Filter betrifft nur den Log-Output, nie die Logik.
         """
 
-        # ─── 1. IMMER: Redundancy Engine verarbeitet jeden Trade ──────────────
+        #  1. IMMER: Redundancy Engine verarbeitet jeden Trade 
         self.redundancy.process_trade(trade)
 
-        # ─── 2. IMMER: Trading Engine prüft auf SELL für offene Positionen ────
+        #  2. IMMER: Trading Engine prüft auf SELL für offene Positionen 
         await self.engine.on_trade_event(trade)
 
-        # ─── 3. Stats ─────────────────────────────────────────────────────────
+        #  3. Stats 
         if trade.side == "SELL":
             self.total_sells += 1
 
-        # ─── 4. Log-Output (Fast Mode filtert Noise raus) ─────────────────────
+        #  4. Log-Output (Fast Mode filtert Noise raus) 
         in_fast_mode = (
             self.source and
             hasattr(self.source, 'is_fast_polling') and
@@ -471,14 +471,14 @@ class PaperTradingMainnetRunner:
             # Im Fast Mode: nur Trades für Token mit offener Position zeigen
             if trade.token in self.portfolio.positions:
                 logger.info(
-                    f"🟢 [mainnet_real  ] {trade.wallet[:8]}... "
+                    f" [mainnet_real  ] {trade.wallet[:8]}... "
                     f"{trade.side:4} {trade.amount:>8.2f} {trade.token[:8]}..."
                 )
             # else: kein Log (kein return, da Logik oben bereits erledigt)
         else:
             # Normal Mode: alles loggen
             logger.info(
-                f"🟢 [mainnet_real  ] {trade.wallet[:8]}... "
+                f" [mainnet_real  ] {trade.wallet[:8]}... "
                 f"{trade.side:4} {trade.amount:>8.2f} {trade.token[:8]}..."
             )
     
@@ -490,11 +490,11 @@ class PaperTradingMainnetRunner:
         self.total_signals += 1
         
         if signal_obj.side == "BUY":
-            # 🚫 SKIP: Irgendeine Position ist bereits offen
+            #  SKIP: Irgendeine Position ist bereits offen
             if self.portfolio.positions:
                 logger.debug(
                     f"[Runner] Ignoring BUY for {signal_obj.token[:8]}... "
-                    f"(position already open – waiting for SELL first)"
+                    f"(position already open  waiting for SELL first)"
                 )
                 return
             
@@ -508,7 +508,7 @@ class PaperTradingMainnetRunner:
 
             print()
             print("="*70)
-            print("🚨 STRONG BUY SIGNAL DETECTED!")
+            print(" STRONG BUY SIGNAL DETECTED!")
             print("="*70)
             print(f"Token:        {signal_obj.token[:15]}...")
             print(f"Wallets:      {signal_obj.wallet_count} unique wallets")
@@ -527,7 +527,7 @@ class PaperTradingMainnetRunner:
             self.total_buys += 1
 
         elif signal_obj.side == "SELL":
-            # SELL Signal von Redundancy Engine – nur loggen
+            # SELL Signal von Redundancy Engine  nur loggen
             # Die eigentliche Position-Schließung läuft über on_trade_event
             # (direkt pro Wallet, nicht auf Redundancy-Ebene)
             logger.debug(
@@ -539,7 +539,7 @@ class PaperTradingMainnetRunner:
         """CTRL+C Handler"""
         if self.shutting_down:
             return
-        print("\n\n🛑 Stopping...")
+        print("\n\n Stopping...")
         self.shutting_down = True
         self.running = False
         if self.source:
@@ -553,7 +553,7 @@ class PaperTradingMainnetRunner:
         
         print("\n")
         print("="*70)
-        print("📊 PAPER TRADING SESSION ENDED")
+        print(" PAPER TRADING SESSION ENDED")
         print("="*70)
         
         if self.start_time:
@@ -562,11 +562,11 @@ class PaperTradingMainnetRunner:
             hours = int(runtime.total_seconds() // 3600)
             minutes = int((runtime.total_seconds() % 3600) // 60)
             seconds = int(runtime.total_seconds() % 60)
-            print(f"⏱️  Runtime: {hours}h {minutes}m {seconds}s")
+            print(f"  Runtime: {hours}h {minutes}m {seconds}s")
             print()
         
         if self.portfolio and self.portfolio.positions:
-            print("\n📊 Closing all open positions...\n")
+            print("\n Closing all open positions...\n")
             for token in list(self.portfolio.positions.keys()):
                 price = await self.oracle.get_price_eur(token)
                 if price:
@@ -577,7 +577,7 @@ class PaperTradingMainnetRunner:
                     )
             print()
         
-        print(f"\n📈 Trading Statistics:")
+        print(f"\n Trading Statistics:")
         print(f"   Total Signals:    {self.total_signals}")
         print(f"   Total Buys:       {self.total_buys}")
         print(f"   Total Sells:      {self.total_sells}")
@@ -585,11 +585,11 @@ class PaperTradingMainnetRunner:
         
         if self.connection_monitor:
             status = self.connection_monitor.get_status()
-            print(f"🛡️  Connection Health:")
+            print(f"  Connection Health:")
             print(f"   Final Status: {'Connected' if status['connected'] else 'Disconnected'}")
             print(f"   Total Disconnections: {status['total_disconnections']}")
             if status['emergency_triggered']:
-                print(f"   ⚠️  Emergency Exit was triggered!")
+                print(f"     Emergency Exit was triggered!")
             print()
         
         if self.engine:
@@ -601,7 +601,7 @@ class PaperTradingMainnetRunner:
         if self.portfolio:
             filepath = f"data/paper_mainnet_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
             self.portfolio.save_to_file(filepath)
-            print(f"\n💾 Portfolio saved to: {filepath}\n")
+            print(f"\n Portfolio saved to: {filepath}\n")
         
         if self.oracle:
             await self.oracle.close()

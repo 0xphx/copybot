@@ -5,7 +5,7 @@ Help Runner - Zeigt alle verfügbaren Commands mit Beschreibung
 
 COMMANDS = [
     {
-        "category": "🤖 PAPER TRADING",
+        "category": " PAPER TRADING",
         "commands": [
             {
                 "cmd": "paper_mainnet",
@@ -31,7 +31,7 @@ COMMANDS = [
         ],
     },
     {
-        "category": "🔍 WALLET ANALYSE",
+        "category": " WALLET ANALYSE",
         "commands": [
             {
                 "cmd": "wallet_analysis",
@@ -51,19 +51,19 @@ COMMANDS = [
                 "args": "[sort] [--min N] [sessions] [wallet PREFIX]",
                 "desc": "Wallet Datenbank im Terminal anzeigen",
                 "details": [
-                    "show_db                 → Alle Wallets nach Confidence sortiert",
-                    "show_db pnl             → Sortiert nach Total P&L",
-                    "show_db winrate         → Sortiert nach Win-Rate",
-                    "show_db trades          → Sortiert nach Trade-Anzahl",
-                    "show_db --min 5         → Nur Wallets mit mindestens 5 Trades",
-                    "show_db sessions        → Alle Sessions mit Datum und Stats",
-                    "show_db wallet 3LUfv2  → Detail-Ansicht eines Wallets (Prefix reicht)",
+                    "show_db                  Alle Wallets nach Confidence sortiert",
+                    "show_db pnl              Sortiert nach Total P&L",
+                    "show_db winrate          Sortiert nach Win-Rate",
+                    "show_db trades           Sortiert nach Trade-Anzahl",
+                    "show_db --min 5          Nur Wallets mit mindestens 5 Trades",
+                    "show_db sessions         Alle Sessions mit Datum und Stats",
+                    "show_db wallet 3LUfv2   Detail-Ansicht eines Wallets (Prefix reicht)",
                 ],
             },
         ],
     },
     {
-        "category": "🌐 LIVE / MONITORING",
+        "category": " LIVE / MONITORING",
         "commands": [
             {
                 "cmd": "live_polling",
@@ -95,7 +95,7 @@ COMMANDS = [
         ],
     },
     {
-        "category": "🗄️  DATEN & WALLETS",
+        "category": "  DATEN & WALLETS",
         "commands": [
             {
                 "cmd": "import",
@@ -124,7 +124,7 @@ COMMANDS = [
         ],
     },
     {
-        "category": "🛠️  ENTWICKLUNG & DEBUGGING",
+        "category": "  ENTWICKLUNG & DEBUGGING",
         "commands": [
             {
                 "cmd": "offline",
@@ -167,8 +167,8 @@ def run():
     W = 70
 
     print()
-    print("  COPYBOT  –  HELP")
-    print("  " + "═" * (W - 2))
+    print("  COPYBOT    HELP")
+    print("  " + "" * (W - 2))
     print()
     print("  Usage:  python main.py <command> [options]")
     print()
@@ -176,19 +176,19 @@ def run():
     for section in COMMANDS:
         print()
         print(f"  {section['category']}")
-        print("  " + "─" * (W - 2))
+        print("  " + "" * (W - 2))
 
         for entry in section["commands"]:
             args_str = f" {entry['args']}" if entry['args'] else ""
             cmd_line = f"python main.py {entry['cmd']}{args_str}"
 
             print(f"  \033[1m{cmd_line}\033[0m")
-            print(f"    → {entry['desc']}")
+            print(f"     {entry['desc']}")
 
             for detail in entry.get("details", []):
-                print(f"       • {detail}")
+                print(f"        {detail}")
 
             print()
 
-    print("─" * W)
+    print("" * W)
     print()
