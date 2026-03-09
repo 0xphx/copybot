@@ -50,7 +50,7 @@ def show_wallet_stats(filter_min_trades: int = 0, sort_by: str = "confidence"):
         print("  (keine Einträge)")
         return
 
-    from trading.wallet_tracker import STRATEGY_SL_TP
+    from trading.wallet_tracker import STRATEGY_SL_TP_DEFAULTS
 
     # Spaltenbreiten
     C_IDX    = 3
@@ -80,9 +80,20 @@ def show_wallet_stats(filter_min_trades: int = 0, sort_by: str = "confidence"):
         ev_str   = f"{r['ev_pct']:+.1f}%" if r['ev_pct'] is not None else "n/a"
         updated  = r['last_updated'][:16].replace('T', ' ')
         label    = r['strategy_label'] if 'strategy_label' in r.keys() else 'UNKNOWN'
-        sl, tp   = STRATEGY_SL_TP.get(label, STRATEGY_SL_TP['UNKNOWN'])
-        sl_str   = f"{sl:.0f}%" if label != 'UNKNOWN' else "--"
-        tp_str   = f"+{tp:.0f}%" if label != 'UNKNOWN' else "--"
+        # Dynamische SL/TP bevorzugen, Fallback auf Label-Defaults
+        dyn_sl   = r['dynamic_sl'] if 'dynamic_sl' in r.keys() and r['dynamic_sl'] is not None else None
+        dyn_tp   = r['dynamic_tp'] if 'dynamic_tp' in r.keys() and r['dynamic_tp'] is not None else None
+        if dyn_sl is not None and dyn_tp is not None:
+            sl, tp   = dyn_sl, dyn_tp
+            sl_str   = f"{sl:.0f}%*"   # * = dynamisch
+            tp_str   = f"+{tp:.0f}%*"
+        elif label != 'UNKNOWN':
+            sl, tp   = STRATEGY_SL_TP_DEFAULTS.get(label, STRATEGY_SL_TP_DEFAULTS['UNKNOWN'])
+            sl_str   = f"{sl:.0f}%"
+            tp_str   = f"+{tp:.0f}%"
+        else:
+            sl_str   = "--"
+            tp_str   = "--"
         marker   = "+" if conf >= 0.7 else "~" if conf >= 0.5 else "-"
 
         print(
@@ -183,10 +194,17 @@ def show_wallet_detail(wallet_prefix: str):
 
     print(f"  🔑 Wallet: {wallet}")
     if stats:
-        from trading.wallet_tracker import STRATEGY_SL_TP
+        from trading.wallet_tracker import STRATEGY_SL_TP_DEFAULTS
         conf  = stats['confidence_score']
         label = stats['strategy_label'] if 'strategy_label' in stats.keys() else 'UNKNOWN'
-        sl, tp = STRATEGY_SL_TP.get(label, STRATEGY_SL_TP['UNKNOWN'])
+        dyn_sl = stats['dynamic_sl'] if 'dynamic_sl' in stats.keys() and stats['dynamic_sl'] is not None else None
+        dyn_tp = stats['dynamic_tp'] if 'dynamic_tp' in stats.keys() and stats['dynamic_tp'] is not None else None
+        if dyn_sl is not None and dyn_tp is not None:
+            sl, tp = dyn_sl, dyn_tp
+            sl_tp_source = "dynamisch*"
+        else:
+            sl, tp = STRATEGY_SL_TP_DEFAULTS.get(label, STRATEGY_SL_TP_DEFAULTS['UNKNOWN'])
+            sl_tp_source = "label-default"
         # Inaktivitäts-Tags aus DB lesen
         tag_conn = sqlite3.connect(DB_PATH)
         tag_conn.row_factory = sqlite3.Row
@@ -199,7 +217,10 @@ def show_wallet_detail(wallet_prefix: str):
         timeout = "5 Min" if tags >= max_tags else "10 Min"
 
         print(f"  Confidence:  {conf:.2f}")
-        print(f"  Strategie:   {label}" + (f"  →  SL {sl:.0f}% / TP +{tp:.0f}%" if label != 'UNKNOWN' else "  (noch < 20 saubere Trades)"))
+        if label != 'UNKNOWN':
+            print(f"  Strategie:   {label}  →  SL {sl:.0f}% / TP +{tp:.0f}%  [{sl_tp_source}]")
+        else:
+            print(f"  Strategie:   {label}  (noch < 20 saubere Trades)")
         print(f"  Inaktivität: {'[' + 'X' * tags + '.' * (max_tags - tags) + ']'} {tags}/{max_tags} Tags  →  Timeout {timeout}")
         print(f"  Trades:      {stats['total_trades']} ({stats['winning_trades']}W / {stats['losing_trades']}L)")
         print(f"  Win Rate:    {stats['win_rate']*100:.1f}%")

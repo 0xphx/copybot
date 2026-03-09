@@ -86,6 +86,7 @@ class PaperTradingEngine:
         if position:
             self.position_trigger_wallets[token] = set(signal.wallets)
             self.last_prices[token] = price_eur
+            self.oracle.set_rate_limit_from_positions(len(self.portfolio.positions))
 
             # SL/TP aus Wallet-Strategie ableiten
             if self.wallet_tracker:
@@ -204,6 +205,7 @@ class PaperTradingEngine:
                 del self.position_last_changed_price[token]
             if token in self.position_last_changed_time:
                 del self.position_last_changed_time[token]
+            self.oracle.set_rate_limit_from_positions(len(self.portfolio.positions))
             
             if not self.portfolio.positions:
                 if self.polling_source:
@@ -224,13 +226,19 @@ class PaperTradingEngine:
         - Prüft Stop-Loss und Take-Profit
         """
         logger.info(
-            f"[PriceMonitor] Started (updates every {self.price_update_interval}s | "
+            f"[PriceMonitor] Started "
+            f"(normal: {self.price_update_interval}s | fast: 1s | "
             f"SL: {self.stop_loss_percent:+.0f}% | TP: {self.take_profit_percent:+.0f}%)"
         )
-        
+
         try:
             while True:
-                await asyncio.sleep(self.price_update_interval)
+                interval = (
+                    1
+                    if self.polling_source and getattr(self.polling_source, 'is_fast_polling', False)
+                    else self.price_update_interval
+                )
+                await asyncio.sleep(interval)
                 
                 if not self.portfolio.positions:
                     logger.info("[PriceMonitor] No open positions - stopping")
@@ -256,7 +264,7 @@ class PaperTradingEngine:
                         print(
                             f"{emoji} [PriceMonitor] {token[:8]}... @ {current_price:.8f} EUR "
                             f"| P&L: {pnl_eur:+.2f} EUR ({pnl_pct:+.2f}%) "
-                            f"| Last {self.price_update_interval}s: {price_change_pct:+.2f}%"
+                            f"| Last {interval}s: {price_change_pct:+.2f}%"
                         )
                         
                         self.last_prices[token] = current_price

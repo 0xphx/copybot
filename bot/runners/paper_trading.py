@@ -17,6 +17,8 @@ from trading.portfolio import PaperPortfolio
 from trading.price_oracle import PriceOracle, MockPriceOracle
 from trading.realistic_oracle import RealisticMockOracle
 from trading.engine import PaperTradingEngine
+from trading.connection_monitor import ConnectionHealthMonitor
+from trading.wallet_tracker import WalletTracker
 
 # Logging
 logging.basicConfig(
@@ -31,13 +33,15 @@ class PaperTradingRunner:
     
     def __init__(self):
         self.running = False
-        self.shutting_down = False  # Verhindert mehrfache Shutdowns
+        self.shutting_down = False
         self.source = None
         self.portfolio = None
         self.oracle = None
         self.engine = None
         self.redundancy = None
-        
+        self.connection_monitor: ConnectionHealthMonitor = None
+        self.tracker: WalletTracker = None
+
         # Statistiken
         self.total_signals = 0
         self.total_buys = 0
@@ -65,10 +69,18 @@ class PaperTradingRunner:
         initial_capital = 1000.0  # 1000 EUR Startkapital
         self.portfolio = PaperPortfolio(initial_capital_eur=initial_capital)
         
-        # 3. Price Oracle (ECHTE Preise von Jupiter/CoinGecko)
-        self.oracle = PriceOracle()  # Echte Preise!
-        # Alternative: RealisticMockOracle() für simulierte Preise
-        
+        # 3. Price Oracle
+        self.oracle = PriceOracle()
+
+        # 4. WalletTracker + ConnectionHealthMonitor
+        self.tracker = WalletTracker()
+        self.connection_monitor = ConnectionHealthMonitor(
+            emergency_callback=self._emergency_close_all_positions,
+            reconnect_callback=None,  # paper_trading hat keinen Missed-SELL Check
+            failure_threshold_seconds=30,
+            check_interval=5.0
+        )
+
         # 5. Redundancy Engine
         self.redundancy = RedundancyEngine(
             time_window_seconds=30,
@@ -93,23 +105,26 @@ class PaperTradingRunner:
         print()
         
         # 6. Hybrid Trade Source
-        # Mit 20 Wallets: poll_interval=5 um Rate Limits zu vermeiden
         self.source = HybridTradeSource(
             rpc_http_url=RPC_HTTP_ENDPOINTS[NETWORK_MAINNET],
             real_wallets=wallet_addresses,
             callback=self._handle_trade,
-            poll_interval=5,  # Erhöht von 2 auf 5 wegen Rate Limits
+            poll_interval=5,
             inject_fake_trades=True,
-            fake_trade_interval=20,  # Fake Pattern alle 20s
-            fast_poll_interval=0.5  # Schnelles Polling bei offenen Positionen
+            fake_trade_interval=20,
+            fast_poll_interval=0.5,
+            connection_monitor=self.connection_monitor
         )
-        
-        # 7. Trading Engine (mit Polling Source Referenz)
+
+        # 7. Trading Engine
         self.engine = PaperTradingEngine(
             portfolio=self.portfolio,
             price_oracle=self.oracle,
-            polling_source=self.source  # Referenz zum Hybrid Source (steuert beide!)
+            polling_source=self.source,
+            wallet_tracker=self.tracker
         )
+
+        await self.connection_monitor.start()
         
         # Signal Handler
         signal.signal(signal.SIGINT, self._signal_handler)
@@ -180,11 +195,35 @@ class PaperTradingRunner:
         await self.engine.on_buy_signal(signal)
         self.total_buys += 1
     
+    async def _emergency_close_all_positions(self):
+        """🚨 Netzwerkausfall – alle Positionen sofort mit letztem bekannten Preis schließen"""
+        print()
+        print("="*70)
+        print("🚨 EMERGENCY: CONNECTION LOST – CLOSING ALL POSITIONS!")
+        print("="*70)
+
+        if not self.portfolio or not self.portfolio.positions:
+            print("   No open positions to close.")
+            return
+
+        for token in list(self.portfolio.positions.keys()):
+            last_price = self.engine.last_prices.get(token, 0.0)
+            print(f"   ❌ Force closed {token[:8]}... @ {last_price:.8f} EUR (last known price)")
+            self.portfolio.close_position(
+                token=token,
+                price_eur=last_price,
+                reason="(Emergency Exit – Connection lost)"
+            )
+
+        print("✅ Emergency exit completed")
+        print("="*70)
+        print()
+
     def _signal_handler(self, signum, frame):
         """CTRL+C Handler"""
         if self.shutting_down:
-            return  # Bereits am Herunterfahren
-        
+            return
+
         print("\n\n🛑 Stopping...")
         self.shutting_down = True
         self.running = False
@@ -198,7 +237,10 @@ class PaperTradingRunner:
         if hasattr(self, '_shutdown_called') and self._shutdown_called:
             return
         self._shutdown_called = True
-        
+
+        if self.connection_monitor:
+            self.connection_monitor.stop()
+
         print("\n")
         print("="*70)
         print("📊 PAPER TRADING SESSION ENDED")
@@ -228,6 +270,16 @@ class PaperTradingRunner:
         if self.engine:
             await self.engine.print_summary()
         
+        # Connection Health
+        if self.connection_monitor:
+            status = self.connection_monitor.get_status()
+            print(f"🛡️  Connection Health:")
+            print(f"   Final Status:         {'Connected' if status['connected'] else 'Disconnected'}")
+            print(f"   Total Disconnections: {status['total_disconnections']}")
+            if status['emergency_triggered']:
+                print(f"   ⚠️  Emergency Exit was triggered!")
+            print()
+
         # Price Statistics
         if hasattr(self.oracle, 'print_all_stats'):
             self.oracle.print_all_stats()

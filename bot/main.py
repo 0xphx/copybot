@@ -67,6 +67,10 @@ def main():
         from runners import test_network
         test_network.run()
 
+    elif mode == "connection_monitor":
+        from runners import connection_monitor
+        connection_monitor.run()
+
     elif mode == "network_debug":
         import network_debug
 

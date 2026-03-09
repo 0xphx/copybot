@@ -22,10 +22,18 @@ class PriceOracle:
     
     def __init__(self):
         self.cache: Dict[str, float] = {}
+        self.cache_time: Dict[str, float] = {}   # token → timestamp des letzten Fetches
         self.session: Optional[aiohttp.ClientSession] = None
         self.fetch_count = 0
         self.hit_count = 0
         self.miss_count = 0
+
+        # Minimale Cache-Zeit bei skip_cache=True (verhindert API-Spam)
+        # Wird dynamisch gesetzt via set_rate_limit_from_positions()
+        self.min_cache_seconds: float = 0.5
+
+        # Limit für DexScreener (Requests/Min)
+        self._api_rate_limit: int = 280  # knapp unter 300 als Puffer
     
     async def _get_session(self) -> aiohttp.ClientSession:
         """Gibt aktive Session zurück oder erstellt neue"""
@@ -38,10 +46,19 @@ class PriceOracle:
         Holt Preis in EUR für Token.
         Gibt None zurück wenn kein echter Preis gefunden wurde – kein Mock-Fallback.
         """
-        # Cache check
+        import time
+
+        # Normaler Cache
         if not skip_cache and token_address in self.cache:
             self.hit_count += 1
             return self.cache[token_address]
+
+        # Minimaler Cache auch bei skip_cache – verhindert API-Spam
+        if skip_cache and self.min_cache_seconds > 0 and token_address in self.cache_time:
+            age = time.monotonic() - self.cache_time[token_address]
+            if age < self.min_cache_seconds:
+                self.hit_count += 1
+                return self.cache[token_address]
         
         self.fetch_count += 1
 
@@ -55,6 +72,7 @@ class PriceOracle:
             price = await fetch_fn(token_address)
             if price is not None:
                 self.cache[token_address] = price
+                self.cache_time[token_address] = time.monotonic()
                 return price
             logger.warning(f"[PriceOracle] ❌ {name} → no price for {token_address[:8]}...")
 
@@ -166,6 +184,26 @@ class PriceOracle:
             logger.warning(f"[PriceOracle] CoinGecko exception: {type(e).__name__}: {e}")
             return None
     
+    def set_rate_limit_from_positions(self, open_positions: int):
+        """
+        Passt min_cache_seconds dynamisch an die Anzahl offener Positionen an.
+        Ziel: immer knapp unter 280 Requests/Min bleiben.
+
+        Formel: cache = positions / rate_limit * 60
+        Beispiele:
+          1 Position  → 0.21s Cache → ~280 Req/Min
+          3 Positionen → 0.64s Cache → ~280 Req/Min
+          5 Positionen → 1.07s Cache → ~280 Req/Min
+         10 Positionen → 2.14s Cache → ~280 Req/Min
+        """
+        n = max(1, open_positions)
+        self.min_cache_seconds = round(n / self._api_rate_limit * 60, 3)
+        logger.debug(
+            f"[PriceOracle] Rate limit adjusted: "
+            f"{n} positions → min_cache={self.min_cache_seconds:.2f}s "
+            f"(~{self._api_rate_limit} req/min)"
+        )
+
     async def get_multiple_prices(self, token_addresses: list) -> Dict[str, float]:
         """Holt mehrere Preise gleichzeitig"""
         prices = {}

@@ -122,7 +122,8 @@ class WalletAccount:
 
 class WalletAnalysisRunner:
 
-    PRICE_UPDATE_INTERVAL = 10
+    PRICE_UPDATE_INTERVAL_NORMAL = 10
+    PRICE_UPDATE_INTERVAL_FAST   = 1
     STOP_LOSS_PERCENT     = -50.0
     TAKE_PROFIT_PERCENT   = 100.0
 
@@ -142,6 +143,10 @@ class WalletAnalysisRunner:
 
         # Inaktivitäts-Tracking: token → (letzter_preis, monotonic_time)
         self.inactivity_tracker: Dict[str, tuple] = {}
+
+        # High/Low Tracking: token → (max_price_pct, min_price_pct)
+        # Speichert höchsten und niedrigsten Preis relativ zum Entry während Position offen
+        self.price_extremes: Dict[str, tuple] = {}
 
         self.active_token:   Optional[str]           = None
         self.active_account: Optional[WalletAccount] = None
@@ -423,10 +428,14 @@ class WalletAnalysisRunner:
         self.open_positions[token]    = (account, price_eur)
         self.price_fail_counts[token] = 0
         self.total_buys += 1
+        self.oracle.set_rate_limit_from_positions(len(self.open_positions))
 
         # Inaktivitäts-Timer starten
         import time
         self.inactivity_tracker[token] = (price_eur, time.monotonic())
+
+        # High/Low Tracking initialisieren (0% = Entry-Preis als Basis)
+        self.price_extremes[token] = (0.0, 0.0)
 
         self.active_token   = token
         self.active_account = account
@@ -505,7 +514,9 @@ class WalletAnalysisRunner:
         self.open_positions.pop(token, None)
         self.price_fail_counts.pop(token, None)
         self.inactivity_tracker.pop(token, None)
+        max_pct, min_pct = self.price_extremes.pop(token, (None, None))
         self.total_sells += 1
+        self.oracle.set_rate_limit_from_positions(len(self.open_positions))
 
         # Tag-Abbau: nur wenn Close NICHT durch Inaktivität ausgelöst wurde
         if reason != "INACTIVITY":
@@ -550,7 +561,9 @@ class WalletAnalysisRunner:
             amount=record['amount'],
             price_eur=price_eur,
             entry_price_eur=record['entry_price_eur'],
-            price_missing=price_missing
+            price_missing=price_missing,
+            max_price_pct=max_pct,
+            min_price_pct=min_pct
         )
 
         if self.open_positions:
@@ -571,13 +584,19 @@ class WalletAnalysisRunner:
 
     async def _price_update_loop(self):
         logger.info(
-            f"[PriceMonitor] Started (updates every {self.PRICE_UPDATE_INTERVAL}s | "
+            f"[PriceMonitor] Started "
+            f"(normal: {self.PRICE_UPDATE_INTERVAL_NORMAL}s | fast: {self.PRICE_UPDATE_INTERVAL_FAST}s | "
             f"SL: {self.STOP_LOSS_PERCENT:.0f}% | TP: +{self.TAKE_PROFIT_PERCENT:.0f}% | "
             f"Max price failures: {MAX_PRICE_FAILURES})"
         )
         try:
             while True:
-                await asyncio.sleep(self.PRICE_UPDATE_INTERVAL)
+                interval = (
+                    self.PRICE_UPDATE_INTERVAL_FAST
+                    if self.source and getattr(self.source, 'is_fast_polling', False)
+                    else self.PRICE_UPDATE_INTERVAL_NORMAL
+                )
+                await asyncio.sleep(interval)
 
                 if not self.open_positions:
                     break
@@ -620,6 +639,15 @@ class WalletAnalysisRunner:
 
                     self.open_positions[token] = (account, current_price)
 
+                    # ── High/Low Tracking ────────────────────────────────────
+                    if pos.entry_price_eur > 0:
+                        current_pct = ((current_price - pos.entry_price_eur) / pos.entry_price_eur) * 100
+                        prev_max, prev_min = self.price_extremes.get(token, (current_pct, current_pct))
+                        self.price_extremes[token] = (
+                            max(prev_max, current_pct),
+                            min(prev_min, current_pct)
+                        )
+
                     # ── Inaktivitäts-Tracking ────────────────────────────────
                     import time
                     last_changed_price, last_changed_time = self.inactivity_tracker.get(
@@ -636,7 +664,7 @@ class WalletAnalysisRunner:
                     print(
                         f"{emoji} [PriceMonitor] {token[:8]}... @ {current_price:.8f} EUR "
                         f"| P&L: {pnl_eur:+.2f} EUR ({pnl_pct:+.2f}%) "
-                        f"| Last {self.PRICE_UPDATE_INTERVAL}s: {change_pct:+.2f}%"
+                        f"| Last {interval}s: {change_pct:+.2f}%"
                         + (f" | Inaktiv: {inactive_secs/60:.1f}/{timeout//60} Min" if inactive_secs > 30 else "")
                     )
 

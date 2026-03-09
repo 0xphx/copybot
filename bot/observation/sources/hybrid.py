@@ -32,8 +32,9 @@ class HybridTradeSource:
         callback=None,
         poll_interval: int = 2,
         inject_fake_trades: bool = True,
-        fake_trade_interval: int = 20,  # Alle 20s ein fake pattern
-        fast_poll_interval: float = 0.5,  # Schnelles Polling bei offenen Positionen
+        fake_trade_interval: int = 20,
+        fast_poll_interval: float = 0.5,
+        connection_monitor=None,
     ):
         # Echter Polling Source
         self.real_source = SolanaPollingSource(
@@ -41,7 +42,8 @@ class HybridTradeSource:
             wallets=real_wallets,
             callback=self._handle_real_trade,
             poll_interval=poll_interval,
-            fast_poll_interval=fast_poll_interval
+            fast_poll_interval=fast_poll_interval,
+            connection_monitor=connection_monitor
         )
         
         self.real_wallets = real_wallets
