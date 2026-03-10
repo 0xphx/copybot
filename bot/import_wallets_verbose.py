@@ -9,7 +9,7 @@ DB_PATH = "data/axiom.db"
 JSON_PATH = "data/axiom_wallets.json"
 
 print("="*70)
-print("📦 WALLET IMPORT (VERBOSE)")
+print(" WALLET IMPORT (VERBOSE)")
 print("="*70)
 print()
 
@@ -18,7 +18,7 @@ print(f"[1/4] Loading JSON: {JSON_PATH}")
 with open(JSON_PATH, 'r', encoding='utf-8') as f:
     wallets = json.load(f)
 
-print(f"✅ Found {len(wallets)} wallets in JSON")
+print(f" Found {len(wallets)} wallets in JSON")
 print()
 
 # Zeige erste 3
@@ -31,7 +31,7 @@ print()
 print(f"[2/4] Opening database: {DB_PATH}")
 conn = sqlite3.connect(DB_PATH)
 cursor = conn.cursor()
-print("✅ Database connected")
+print(" Database connected")
 print()
 
 # 3. Alte Wallets löschen
@@ -41,7 +41,7 @@ old_count = cursor.fetchone()[0]
 print(f"   Old wallets in DB: {old_count}")
 
 cursor.execute("DELETE FROM axiom_wallets")
-print(f"✅ Deleted {old_count} old wallets")
+print(f" Deleted {old_count} old wallets")
 print()
 
 # 4. Neue Wallets einfügen
@@ -61,7 +61,7 @@ for i, entry in enumerate(wallets, 1):
         print(f"   ... ({len(wallets) - 6} more) ...")
 
 conn.commit()
-print(f"✅ Inserted {len(wallets)} wallets")
+print(f" Inserted {len(wallets)} wallets")
 print()
 
 # 5. Verify
@@ -73,7 +73,7 @@ conn.close()
 
 print()
 print("="*70)
-print("✅ IMPORT COMPLETE!")
+print(" IMPORT COMPLETE!")
 print("="*70)
 print()
 print("Run: python debug_db.py to see all wallets")

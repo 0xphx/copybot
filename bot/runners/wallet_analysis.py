@@ -1,16 +1,16 @@
 """
 Wallet Analysis Runner
-────────────────────────────────────────────────────────────────────────
+
 Jedes beobachtete Wallet bekommt ein eigenes virtuelles Konto (1000 EUR).
-Jeder BUY eines Wallets öffnet eine eigene Position – unabhängig von anderen.
+Jeder BUY eines Wallets öffnet eine eigene Position  unabhängig von anderen.
 Jeder SELL schließt exakt diese Position.
-Max. N globale offene Positionen gleichzeitig – Counter geht nach SELL wieder runter.
+Max. N globale offene Positionen gleichzeitig  Counter geht nach SELL wieder runter.
 
 Sicherheitsmechanismen (identisch zu paper_mainnet):
   - ConnectionHealthMonitor: Emergency Exit bei Netzwerkausfall
   - Reconnect Callback: Verpasste SELLs nach Reconnect prüfen
-  - PriceMonitor: Stop-Loss / Take-Profit / 5x kein Preis → Totalverlust
-  - Shutdown: aktueller Marktpreis, bei fehlendem Preis → Totalverlust
+  - PriceMonitor: Stop-Loss / Take-Profit / 5x kein Preis  Totalverlust
+  - Shutdown: aktueller Marktpreis, bei fehlendem Preis  Totalverlust
 
 Realitätsnähe hat immer Priorität.
 """
@@ -137,11 +137,11 @@ class WalletAnalysisRunner:
         self.accounts: Dict[str, WalletAccount] = {}
 
         self.max_positions: int = 1
-        # token → (account, last_price)
+        # token  (account, last_price)
         self.open_positions:    Dict[str, tuple] = {}
         self.price_fail_counts: Dict[str, int]   = {}
 
-        # Inaktivitäts-Tracking: token → (letzter_preis, monotonic_time)
+        # Inaktivitäts-Tracking: token  (letzter_preis, monotonic_time)
         self.inactivity_tracker: Dict[str, tuple] = {}
 
         # High/Low Tracking: token → (max_price_pct, min_price_pct)
@@ -160,14 +160,14 @@ class WalletAnalysisRunner:
         self.total_buys  = 0
         self.total_sells = 0
 
-    # ─────────────────────────────────────────────────────────────────────
+    # 
     # STARTUP
-    # ─────────────────────────────────────────────────────────────────────
+    # 
 
     async def run(self):
         print()
         print("="*70)
-        print("🔍 WALLET ANALYSIS MODE")
+        print(" WALLET ANALYSIS MODE")
         print("   Jedes Wallet hat ein eigenes Konto (1000 EUR, 20% pro Trade)")
         print(f"   Stop-Loss: {self.STOP_LOSS_PERCENT:.0f}%  |  Take-Profit: +{self.TAKE_PROFIT_PERCENT:.0f}%")
         print(f"   Preis-Ausfall: Totalverlust nach {MAX_PRICE_FAILURES} fehlgeschlagenen Abfragen")
@@ -176,7 +176,7 @@ class WalletAnalysisRunner:
 
         active_wallets = sync_wallets()
         if not active_wallets:
-            logger.error("❌ No active wallets found!")
+            logger.error(" No active wallets found!")
             return
 
         wallet_addresses = [w.wallet for w in active_wallets]
@@ -191,7 +191,7 @@ class WalletAnalysisRunner:
         conf_map = self.tracker.get_confidence_map(wallet_addresses)
         known = [(w, s) for w, s in conf_map.items() if s != 0.5]
         if known:
-            print(f"📊 Bekannte Wallet Scores ({len(known)}/{len(wallet_addresses)}):")
+            print(f" Bekannte Wallet Scores ({len(known)}/{len(wallet_addresses)}):")
             for w, s in sorted(known, key=lambda x: -x[1])[:10]:
                 print(f"   {w[:20]}...  {s:.2f}")
             print()
@@ -218,7 +218,7 @@ class WalletAnalysisRunner:
         signal.signal(signal.SIGINT, self._signal_handler)
         self.start_time = datetime.now()
 
-        print("⏳ Watching all wallets...")
+        print(" Watching all wallets...")
         print("   Press CTRL+C to stop and see results")
         print()
 
@@ -233,41 +233,41 @@ class WalletAnalysisRunner:
         self.config = {}
         print()
         print("="*70)
-        print("⚙️  ANALYSIS CONFIGURATION")
+        print("  ANALYSIS CONFIGURATION")
         print("="*70)
         print()
         print("Drücke ENTER für Standardwerte")
         print()
 
         while True:
-            inp = input("📊 Max. gleichzeitige Positionen [1]: ").strip()
+            inp = input(" Max. gleichzeitige Positionen [1]: ").strip()
             if not inp:
                 self.max_positions = 1
                 break
             try:
                 v = int(inp)
                 if v < 1:
-                    print("   ❌ Muss mindestens 1 sein!")
+                    print("    Muss mindestens 1 sein!")
                     continue
                 self.max_positions = v
                 break
             except ValueError:
-                print("   ❌ Bitte eine ganze Zahl eingeben!")
+                print("    Bitte eine ganze Zahl eingeben!")
 
         while True:
-            inp = input("🛡️  Connection Timeout (Sekunden) [30]: ").strip()
+            inp = input("  Connection Timeout (Sekunden) [30]: ").strip()
             if not inp:
                 self.config['failure_threshold'] = 30
                 break
             try:
                 v = int(inp)
                 if v <= 0:
-                    print("   ❌ Muss größer als 0 sein!")
+                    print("    Muss größer als 0 sein!")
                     continue
                 self.config['failure_threshold'] = v
                 break
             except ValueError:
-                print("   ❌ Bitte eine ganze Zahl eingeben!")
+                print("    Bitte eine ganze Zahl eingeben!")
 
         print()
         print("="*70)
@@ -280,15 +280,15 @@ class WalletAnalysisRunner:
         print("="*70)
         print()
 
-    # ─────────────────────────────────────────────────────────────────────
+    # 
     # EMERGENCY EXIT (Connection Lost)
-    # ─────────────────────────────────────────────────────────────────────
+    # 
 
     async def _emergency_close_all_positions(self):
-        """🚨 Netzwerkausfall – alle Positionen sofort schließen"""
+        """ Netzwerkausfall  alle Positionen sofort schließen"""
         print()
         print("="*70)
-        print("🚨 EMERGENCY: CONNECTION LOST – CLOSING ALL POSITIONS!")
+        print(" EMERGENCY: CONNECTION LOST  CLOSING ALL POSITIONS!")
         print("="*70)
 
         if not self.open_positions:
@@ -296,9 +296,9 @@ class WalletAnalysisRunner:
             return
 
         for token, (account, last_price) in list(self.open_positions.items()):
-            # Letzten bekannten Preis verwenden – realistischer als 0
+            # Letzten bekannten Preis verwenden  realistischer als 0
             # (Verbindung war kurz weg, Preis vor Ausfall ist beste Näherung)
-            print(f"   ❌ Force closed {token[:8]}... @ {last_price:.8f} EUR (last known price)")
+            print(f"    Force closed {token[:8]}... @ {last_price:.8f} EUR (last known price)")
             await self._close_position(
                 token=token,
                 account=account,
@@ -307,16 +307,16 @@ class WalletAnalysisRunner:
                 trigger_label="Connection lost"
             )
 
-        print(f"✅ Emergency exit completed")
+        print(f" Emergency exit completed")
         print("="*70)
         print()
 
-    # ─────────────────────────────────────────────────────────────────────
-    # RECONNECT – Verpasste SELLs prüfen
-    # ─────────────────────────────────────────────────────────────────────
+    # 
+    # RECONNECT  Verpasste SELLs prüfen
+    # 
 
     async def _check_for_missed_sells(self):
-        """🔄 Nach Reconnect: Prüft ob Wallets während Offline-Phase verkauft haben"""
+        """ Nach Reconnect: Prüft ob Wallets während Offline-Phase verkauft haben"""
         if not self.open_positions:
             return
 
@@ -365,7 +365,7 @@ class WalletAnalysisRunner:
                                     exit_price = price if price else 0.0
                                     price_missing = price is None
                                     if price_missing:
-                                        logger.warning(f"[MissedSells] No price for {token[:8]}... – using 0 EUR")
+                                        logger.warning(f"[MissedSells] No price for {token[:8]}...  using 0 EUR")
                                     await self._close_position(
                                         token=token,
                                         account=account,
@@ -381,13 +381,13 @@ class WalletAnalysisRunner:
                 continue
 
         if missed > 0:
-            logger.info(f"[MissedSells] ✅ Found and processed {missed} missed SELL(s)")
+            logger.info(f"[MissedSells]  Found and processed {missed} missed SELL(s)")
         else:
-            logger.info("[MissedSells] ✅ No missed SELLs detected")
+            logger.info("[MissedSells]  No missed SELLs detected")
 
-    # ─────────────────────────────────────────────────────────────────────
+    # 
     # TRADE HANDLER
-    # ─────────────────────────────────────────────────────────────────────
+    # 
 
     async def _handle_trade(self, trade: TradeEvent):
         account = self.accounts.get(trade.wallet)
@@ -401,7 +401,7 @@ class WalletAnalysisRunner:
         )
         if not in_fast_mode or trade.token in self.open_positions:
             logger.info(
-                f"🟢 [analysis] {trade.wallet[:8]}... "
+                f" [analysis] {trade.wallet[:8]}... "
                 f"{trade.side:4} {trade.amount:>12.2f} {trade.token[:8]}..."
             )
 
@@ -418,7 +418,7 @@ class WalletAnalysisRunner:
 
         price_eur = await self.oracle.get_price_eur(token)
         if not price_eur:
-            logger.warning(f"[analysis] ⚠️  BUY skipped – no price for {token[:8]}...")
+            logger.warning(f"[analysis]   BUY skipped  no price for {token[:8]}...")
             return
 
         pos = account.open_position(token, price_eur)
@@ -452,7 +452,7 @@ class WalletAnalysisRunner:
         open_slots = f"{len(self.open_positions)}/{self.max_positions}"
         print()
         print("="*70)
-        print("🚨 BUY SIGNAL DETECTED!")
+        print(" BUY SIGNAL DETECTED!")
         print("="*70)
         print(f"Token:        {token[:20]}...")
         print(f"Wallet:       {account.wallet[:20]}...")
@@ -464,7 +464,7 @@ class WalletAnalysisRunner:
         print()
 
         logger.info(
-            f"[Portfolio] 🟢 BOUGHT {pos.amount:.4f} {token[:8]}... "
+            f"[Portfolio]  BOUGHT {pos.amount:.4f} {token[:8]}... "
             f"@ {price_eur:.8f} EUR = {pos.cost_eur:.2f} EUR"
         )
 
@@ -482,7 +482,7 @@ class WalletAnalysisRunner:
         price_eur = await self.oracle.get_price_eur(token, skip_cache=True)
         price_missing = price_eur is None
         if price_missing:
-            logger.warning(f"[analysis] ⚠️  SELL – no price for {token[:8]}..., assuming total loss (0 EUR)")
+            logger.warning(f"[analysis]   SELL  no price for {token[:8]}..., assuming total loss (0 EUR)")
             price_eur = 0.0
 
         await self._close_position(
@@ -494,9 +494,9 @@ class WalletAnalysisRunner:
             price_missing=price_missing
         )
 
-    # ─────────────────────────────────────────────────────────────────────
+    # 
     # POSITION SCHLIESSEN (zentral)
-    # ─────────────────────────────────────────────────────────────────────
+    # 
 
     async def _close_position(
         self,
@@ -526,8 +526,8 @@ class WalletAnalysisRunner:
 
         pnl_eur      = record['pnl_eur']
         pnl_pct      = record['pnl_percent']
-        result_emoji = "✅" if pnl_eur >= 0 else "🛑"
-        missing_tag  = "  ⚠️  [PREIS NICHT VERFÜGBAR – TOTALVERLUST ANGENOMMEN]" if price_missing else ""
+        result_emoji = "" if pnl_eur >= 0 else ""
+        missing_tag  = "    [PREIS NICHT VERFÜGBAR  TOTALVERLUST ANGENOMMEN]" if price_missing else ""
         open_slots   = f"{len(self.open_positions)}/{self.max_positions}"
 
         print()
@@ -538,19 +538,19 @@ class WalletAnalysisRunner:
         print(f"Trigger:      {trigger_label}")
         print(f"Wallet:       {account.wallet[:20]}...")
         print(f"Entry Price:  {record['entry_price_eur']:.8f} EUR")
-        print(f"Exit Price:   {price_eur:.8f} EUR" + (" ⚠️  (kein Preis abrufbar)" if price_missing else ""))
+        print(f"Exit Price:   {price_eur:.8f} EUR" + ("   (kein Preis abrufbar)" if price_missing else ""))
         print(f"P&L:          {pnl_eur:+.2f} EUR ({pnl_pct:+.2f}%)")
         print(f"Amount:       {record['amount']:.4f}")
         print(f"Slots:        {open_slots}")
         if price_missing:
-            print(f"⚠️  HINWEIS: Kein Preis abrufbar – Trade in DB als 'price_missing' markiert.")
+            print(f"  HINWEIS: Kein Preis abrufbar  Trade in DB als 'price_missing' markiert.")
         print("="*70)
         print()
 
         logger.info(
-            f"[PaperPortfolio] {'🟢' if pnl_eur >= 0 else '🔴'} SOLD {record['amount']:.4f} "
+            f"[PaperPortfolio] {'' if pnl_eur >= 0 else ''} SOLD {record['amount']:.4f} "
             f"{token[:8]}... @ {price_eur:.8f} EUR = {record['value_eur']:.2f} EUR"
-            + (" ⚠️  price_missing" if price_missing else "")
+            + ("   price_missing" if price_missing else "")
         )
         logger.info(f"[PaperPortfolio] P&L: {pnl_eur:+.2f} EUR ({pnl_pct:+.2f}%)")
 
@@ -578,9 +578,9 @@ class WalletAnalysisRunner:
             if self.price_update_task and not self.price_update_task.done():
                 self.price_update_task.cancel()
 
-    # ─────────────────────────────────────────────────────────────────────
+    # 
     # PRICE MONITOR LOOP
-    # ─────────────────────────────────────────────────────────────────────
+    # 
 
     async def _price_update_loop(self):
         logger.info(
@@ -612,12 +612,12 @@ class WalletAnalysisRunner:
                         self.price_fail_counts[token] = self.price_fail_counts.get(token, 0) + 1
                         fails = self.price_fail_counts[token]
                         logger.warning(
-                            f"[PriceMonitor] ⚠️  No price for {token[:8]}... "
+                            f"[PriceMonitor]   No price for {token[:8]}... "
                             f"({fails}/{MAX_PRICE_FAILURES} failures)"
                         )
                         if fails >= MAX_PRICE_FAILURES:
                             logger.warning(
-                                f"[PriceMonitor] 💀 {token[:8]}... – {MAX_PRICE_FAILURES}x no price. "
+                                f"[PriceMonitor]  {token[:8]}...  {MAX_PRICE_FAILURES}x no price. "
                                 f"Assuming total loss (0 EUR)."
                             )
                             await self._close_position(
@@ -660,7 +660,7 @@ class WalletAnalysisRunner:
                     timeout = self.tracker.get_inactivity_timeout([account.wallet])
                     inactive_secs = time.monotonic() - last_changed_time
 
-                    emoji = "📈" if pnl_eur > 0 else "📉" if pnl_eur < 0 else "➡️"
+                    emoji = "" if pnl_eur > 0 else "" if pnl_eur < 0 else ""
                     print(
                         f"{emoji} [PriceMonitor] {token[:8]}... @ {current_price:.8f} EUR "
                         f"| P&L: {pnl_eur:+.2f} EUR ({pnl_pct:+.2f}%) "
@@ -670,11 +670,11 @@ class WalletAnalysisRunner:
 
                     if inactive_secs >= timeout:
                         logger.warning(
-                            f"[Inactivity] ⏱️ {token[:8]}... no price change for "
-                            f"{inactive_secs/60:.1f} min (limit {timeout//60} min) – closing"
+                            f"[Inactivity]  {token[:8]}... no price change for "
+                            f"{inactive_secs/60:.1f} min (limit {timeout//60} min)  closing"
                         )
                         tags = self.tracker.add_inactivity_tag(account.wallet)
-                        logger.info(f"[Inactivity] Tag {account.wallet[:8]}... → {tags}/3")
+                        logger.info(f"[Inactivity] Tag {account.wallet[:8]}...  {tags}/3")
                         await self._close_position(
                             token=token, account=account,
                             price_eur=current_price,
@@ -685,7 +685,7 @@ class WalletAnalysisRunner:
 
                     if pnl_pct <= self.STOP_LOSS_PERCENT:
                         logger.warning(
-                            f"[StopLoss] 🛑 {token[:8]}... hit stop-loss "
+                            f"[StopLoss]  {token[:8]}... hit stop-loss "
                             f"({pnl_pct:.1f}% <= {self.STOP_LOSS_PERCENT:.0f}%)"
                         )
                         await self._close_position(
@@ -698,7 +698,7 @@ class WalletAnalysisRunner:
 
                     if pnl_pct >= self.TAKE_PROFIT_PERCENT:
                         logger.info(
-                            f"[TakeProfit] 🎯 {token[:8]}... hit take-profit "
+                            f"[TakeProfit]  {token[:8]}... hit take-profit "
                             f"({pnl_pct:.1f}% >= +{self.TAKE_PROFIT_PERCENT:.0f}%)"
                         )
                         await self._close_position(
@@ -713,14 +713,14 @@ class WalletAnalysisRunner:
         except Exception as e:
             logger.error(f"[PriceMonitor] Crashed: {e}")
 
-    # ─────────────────────────────────────────────────────────────────────
+    # 
     # SIGNAL HANDLER & SHUTDOWN
-    # ─────────────────────────────────────────────────────────────────────
+    # 
 
     def _signal_handler(self, signum, frame):
         if self.shutting_down:
             return
-        print("\n\n🛑 Stopping analysis...")
+        print("\n\n Stopping analysis...")
         self.shutting_down = True
         if self.source:
             self.source.stop()
@@ -737,13 +737,13 @@ class WalletAnalysisRunner:
             self.connection_monitor.stop()
 
         if self.open_positions:
-            print(f"\n⏳ Closing {len(self.open_positions)} open position(s) at current market price...")
+            print(f"\n Closing {len(self.open_positions)} open position(s) at current market price...")
             for token, (account, _) in list(self.open_positions.items()):
                 price = await self.oracle.get_price_eur(token, skip_cache=True)
                 price_missing = price is None
                 if price_missing:
                     price = 0.0
-                    logger.warning(f"[Shutdown] ⚠️  No price for {token[:8]}... – assuming total loss (0 EUR)")
+                    logger.warning(f"[Shutdown]   No price for {token[:8]}...  assuming total loss (0 EUR)")
                 await self._close_position(
                     token=token, account=account,
                     price_eur=price,
@@ -764,7 +764,7 @@ class WalletAnalysisRunner:
 
         print()
         print("="*70)
-        print(f"📊 WALLET ANALYSIS RESULTS  |  Runtime: {runtime_str}")
+        print(f" WALLET ANALYSIS RESULTS  |  Runtime: {runtime_str}")
         print(f"   Session: {self.session_id}")
         print("="*70)
 
@@ -804,7 +804,7 @@ class WalletAnalysisRunner:
 
             print()
             print("="*70)
-            print("📋 TRADE DETAILS PER WALLET")
+            print(" TRADE DETAILS PER WALLET")
             print("="*70)
 
             # Spaltenbreiten Trade-Details
@@ -834,7 +834,7 @@ class WalletAnalysisRunner:
 
         print()
         print("-"*70)
-        print(f"📈 Session Statistics:")
+        print(f" Session Statistics:")
         print(f"   Total BUYs:      {self.total_buys}")
         print(f"   Total SELLs:     {self.total_sells}")
         print(f"   Wallets active:  {len(active_accounts)}/{len(self.accounts)}")
@@ -842,14 +842,14 @@ class WalletAnalysisRunner:
 
         if self.connection_monitor:
             status = self.connection_monitor.get_status()
-            print(f"🛡️  Connection Health:")
+            print(f"  Connection Health:")
             print(f"   Final Status:         {'Connected' if status['connected'] else 'Disconnected'}")
             print(f"   Total Disconnections: {status['total_disconnections']}")
             if status['emergency_triggered']:
-                print(f"   ⚠️  Emergency Exit was triggered!")
+                print(f"     Emergency Exit was triggered!")
             print()
 
-        print(f"💾 Performance saved to: data/wallet_performance.db")
+        print(f" Performance saved to: data/wallet_performance.db")
         print("="*70)
 
         if self.oracle:

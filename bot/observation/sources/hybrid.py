@@ -160,7 +160,7 @@ class HybridTradeSource:
         base_amount = random.uniform(100, 1000)
         
         print()
-        print(f"💉 [Hybrid] Injecting FAKE BUY pattern:")
+        print(f" [Hybrid] Injecting FAKE BUY pattern:")
         print(f"   Token: {token[:8]}...")
         print(f"   Wallets: {num_wallets}")
         print()
@@ -173,7 +173,7 @@ class HybridTradeSource:
         for i, wallet in enumerate(selected_wallets):
             # Prüfe ob pausiert wurde (während vorherigem Delay)
             if self.pause_fake_injector:
-                logger.info(f"[Hybrid] ⚠️ BUY pattern INTERRUPTED after {i} trades (paused)")
+                logger.info(f"[Hybrid]  BUY pattern INTERRUPTED after {i} trades (paused)")
                 break
             
             # Kleine Amount Variation (±10%)
@@ -221,7 +221,7 @@ class HybridTradeSource:
             oldest = min(buy["timestamp"] for buy in buys)
             age_seconds = (now - oldest).total_seconds()
             
-            # Wenn älter als 30s → verkaufe 1-2 Wallets
+            # Wenn älter als 30s  verkaufe 1-2 Wallets
             if age_seconds > 30:
                 await self._generate_fake_sell_pattern(token)
     
@@ -265,11 +265,11 @@ class HybridTradeSource:
             sells = random.sample(buys, num_sells)
         
         print()
-        print(f"💉 [Hybrid] Injecting FAKE SELL pattern:")
+        print(f" [Hybrid] Injecting FAKE SELL pattern:")
         print(f"   Token: {token[:8]}...")
         print(f"   Wallets: {num_sells}")
         if self.active_trigger_wallets:
-            print(f"   🎯 TRIGGER WALLETS (will close position!)")
+            print(f"    TRIGGER WALLETS (will close position!)")
         print()
         
         for sell_info in sells:
@@ -320,18 +320,18 @@ class HybridTradeSource:
     def pause_fake_trades(self):
         """Pausiert Fake Trade Generation"""
         self.pause_fake_injector = True
-        logger.info("[Hybrid] ⏸️ Fake trade injector PAUSED")
+        logger.info("[Hybrid]  Fake trade injector PAUSED")
     
     def resume_fake_trades(self):
         """Setzt Fake Trade Generation fort"""
         self.pause_fake_injector = False
-        logger.info("[Hybrid] ▶️ Fake trade injector RESUMED")
+        logger.info("[Hybrid]  Fake trade injector RESUMED")
     
     def start_watching_wallets(self, wallets: list[str]):
         """Leitet an real_source weiter und trackt Trigger-Wallets"""
         # Merke welche Wallets zur Position gehören
         self.active_trigger_wallets = set(wallets)
-        logger.info(f"[Hybrid] 🎯 Tracking {len(wallets)} trigger wallets for SELL generation")
+        logger.info(f"[Hybrid]  Tracking {len(wallets)} trigger wallets for SELL generation")
         
         if hasattr(self.real_source, 'start_watching_wallets'):
             self.real_source.start_watching_wallets(wallets)
@@ -340,7 +340,7 @@ class HybridTradeSource:
         """Leitet an real_source weiter und löscht Trigger-Wallets"""
         # Keine Trigger-Wallets mehr
         self.active_trigger_wallets.clear()
-        logger.info("[Hybrid] 🎯 Trigger wallets cleared")
+        logger.info("[Hybrid]  Trigger wallets cleared")
         
         if hasattr(self.real_source, 'stop_watching_wallets'):
             self.real_source.stop_watching_wallets()

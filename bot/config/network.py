@@ -94,8 +94,8 @@ def print_helius_info():
     """Zeigt Info über Helius RPC"""
     print("\n[OK] HELIUS RPC CONFIGURED!")
     print("   Benefits:")
-    print("   • Wallet subscriptions supported")
-    print("   • Higher rate limits (100k requests/day)")
-    print("   • Better reliability")
-    print("   • Enhanced transaction data")
-    print("   • Free tier for development")
+    print("    Wallet subscriptions supported")
+    print("    Higher rate limits (100k requests/day)")
+    print("    Better reliability")
+    print("    Enhanced transaction data")
+    print("    Free tier for development")

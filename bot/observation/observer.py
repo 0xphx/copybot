@@ -4,8 +4,8 @@ class TradeObserver:
     def __init__(self, source: TradeSource | None = None):
         """
         source:
-        - gesetzt → Pull-basierte Source (Fake, Replay)
-        - None    → Push-basierte Source (Helius, RPC)
+        - gesetzt  Pull-basierte Source (Fake, Replay)
+        - None     Push-basierte Source (Helius, RPC)
         """
         self.source = source
 

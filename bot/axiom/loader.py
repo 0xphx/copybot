@@ -12,7 +12,7 @@ def load_wallets_from_json(json_path: str) -> None:
     Design:
     - Die JSON ist die Quelle der Wahrheit für diesen Import
     - Die Tabelle wird vor dem Import geleert
-    - Der Import ist idempotent (gleiches Input → gleicher DB-Zustand)
+    - Der Import ist idempotent (gleiches Input  gleicher DB-Zustand)
 
     Erwartetes JSON-Format:
     [
@@ -39,7 +39,7 @@ def load_wallets_from_json(json_path: str) -> None:
     cursor = conn.cursor()
 
     # --- Transaktion starten (wichtig!)
-    # Alles oder nichts → verhindert kaputte DB-Zustände
+    # Alles oder nichts  verhindert kaputte DB-Zustände
     try:
         # Alte Daten entfernen
         cursor.execute("DELETE FROM axiom_wallets")
@@ -67,7 +67,7 @@ def load_wallets_from_json(json_path: str) -> None:
         print(f"[Axiom Loader] Imported {len(wallets)} wallets from {json_path}")
 
     except Exception:
-        # Bei Fehler → alles zurückrollen
+        # Bei Fehler  alles zurückrollen
         conn.rollback()
         raise
 

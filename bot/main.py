@@ -75,7 +75,7 @@ def main():
         import network_debug
 
     else:
-        print(f"\n❌ Unbekannter Command: '{mode}'")
+        print(f"\n Unbekannter Command: '{mode}'")
         print("   Tippe 'python main.py help' für alle verfügbaren Commands.\n")
 
 if __name__ == "__main__":

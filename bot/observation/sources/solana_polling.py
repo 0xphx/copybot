@@ -31,8 +31,8 @@ class SolanaPollingSource(TradeSource):
     Funktionsweise:
     1. Alle X Sekunden: Hole neueste Transactions für jede Wallet
     2. Vergleiche Signatures mit bereits gesehenen
-    3. Neue Transactions → Parse & Emit Trade Events
-    4. 🛡️ Connection Monitoring → Emergency Exit bei Netzwerkausfall
+    3. Neue Transactions  Parse & Emit Trade Events
+    4.  Connection Monitoring  Emergency Exit bei Netzwerkausfall
     """
 
     def __init__(
@@ -43,7 +43,7 @@ class SolanaPollingSource(TradeSource):
         poll_interval: int = 2,
         ignore_initial_txs: bool = True,
         fast_poll_interval: float = 0.5,
-        connection_monitor=None,  # 🛡️ Connection Health Monitor
+        connection_monitor=None,  #  Connection Health Monitor
     ):
         super().__init__()
         self.rpc_http_url = rpc_http_url
@@ -59,7 +59,7 @@ class SolanaPollingSource(TradeSource):
         self.watch_wallets: Set[str] = set()
         self.is_fast_polling = False
         
-        # 🛡️ Connection Monitoring
+        #  Connection Monitoring
         self.connection_monitor = connection_monitor
         
         print(f"[Polling] Normal interval: {poll_interval}s")
@@ -68,7 +68,7 @@ class SolanaPollingSource(TradeSource):
         if ignore_initial_txs:
             print(f"[Polling] Ignoring transactions before start time")
         if connection_monitor:
-            print(f"[Polling] 🛡️ Connection monitoring ENABLED")
+            print(f"[Polling]  Connection monitoring ENABLED")
         
         if callback:
             self.on_trade = callback
@@ -79,7 +79,7 @@ class SolanaPollingSource(TradeSource):
         self.running = True
         logger.info(f"[Polling] Starting with {len(self.wallets)} wallets")
         
-        # 🛡️ Starte Connection Monitor
+        #  Starte Connection Monitor
         if self.connection_monitor:
             await self.connection_monitor.start()
         
@@ -101,7 +101,7 @@ class SolanaPollingSource(TradeSource):
                 self.running = False
                 raise
             finally:
-                # 🛡️ Stoppe Connection Monitor
+                #  Stoppe Connection Monitor
                 if self.connection_monitor:
                     self.connection_monitor.stop()
 
@@ -124,7 +124,7 @@ class SolanaPollingSource(TradeSource):
     async def poll_wallet(self, wallet: str):
         """
         Fragt neueste Transactions einer Wallet ab
-        🛡️ MIT CONNECTION MONITORING
+         MIT CONNECTION MONITORING
         """
         try:
             payload = {
@@ -144,7 +144,7 @@ class SolanaPollingSource(TradeSource):
             ) as response:
                 data = await response.json()
                 
-                # 🛡️ SUCCESS → Melde an Monitor
+                #  SUCCESS  Melde an Monitor
                 if self.connection_monitor:
                     self.connection_monitor.record_success()
                 
@@ -173,7 +173,7 @@ class SolanaPollingSource(TradeSource):
                         await self.fetch_and_process_transaction(sig, wallet)
                         
         except (asyncio.TimeoutError, aiohttp.ClientError, OSError) as e:
-            # 🛡️ FAILURE → Melde an Monitor
+            #  FAILURE  Melde an Monitor
             if self.connection_monitor:
                 self.connection_monitor.record_failure()
             
@@ -339,7 +339,7 @@ class SolanaPollingSource(TradeSource):
             'current_interval': self.fast_poll_interval if self.is_fast_polling else self.poll_interval
         }
         
-        # 🛡️ Connection Monitor Status
+        #  Connection Monitor Status
         if self.connection_monitor:
             status['connection'] = self.connection_monitor.get_status()
         
@@ -352,7 +352,7 @@ class SolanaPollingSource(TradeSource):
         self.is_fast_polling = True
         
         if not was_fast:
-            logger.info(f"[Polling] ⚡ FAST MODE activated for {len(wallets)} wallets (polling every {self.fast_poll_interval}s)")
+            logger.info(f"[Polling]  FAST MODE activated for {len(wallets)} wallets (polling every {self.fast_poll_interval}s)")
     
     def stop_watching_wallets(self):
         """Stoppt schnelles Polling"""
@@ -361,7 +361,7 @@ class SolanaPollingSource(TradeSource):
         self.is_fast_polling = False
         
         if was_fast:
-            logger.info(f"[Polling] 🐢 NORMAL MODE restored (polling every {self.poll_interval}s)")
+            logger.info(f"[Polling]  NORMAL MODE restored (polling every {self.poll_interval}s)")
     
     def listen(self):
         """Dummy method for abstract base class (not used in async polling)"""

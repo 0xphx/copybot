@@ -1,5 +1,5 @@
 """
-Wallet Tracker - Performance-Datenbank für Wallets
+Wallet Tracker - Performance-Datenbank fuer Wallets
 Speichert Trade-Historie pro Wallet und berechnet Confidence Score
 """
 import sqlite3
@@ -41,7 +41,7 @@ class WalletStats:
     total_pnl_eur: float
     avg_pnl_eur: float
     win_rate: float
-    confidence_score: float   # 0.0 – 1.0
+    confidence_score: float   # 0.0 - 1.0
     last_updated: datetime
 
 
@@ -49,7 +49,7 @@ class WalletStats:
 # Werden genutzt solange ein Wallet noch keine dynamischen SL/TP Werte hat
 # Format: (stop_loss_pct, take_profit_pct)
 STRATEGY_SL_TP_DEFAULTS = {
-    'ASYMMETRIC':  (-35.0, 150.0),  # Große Gewinne, enge Verluste
+    'ASYMMETRIC':  (-35.0, 150.0),  # Grosse Gewinne, enge Verluste
     'RUNNER':      (-50.0, 175.0),  # Alles oder nichts
     'SCALPER':     (-20.0,  40.0),  # Schnelle kleine Gewinne
     'LOSS_MAKER':  (-25.0,  50.0),  # Konservativ
@@ -61,39 +61,39 @@ STRATEGY_SL_TP_DEFAULTS = {
 GLOBAL_SL_DEFAULT = -50.0
 GLOBAL_TP_DEFAULT = 100.0
 
-# Positionsgröße für relative P&L Berechnung
+# Positionsgroesse fuer relative P&L Berechnung
 POSITION_SIZE_EUR = 200.0  # 1000 EUR * 20%
 
 
 class WalletTracker:
     """
-    Verwaltet die Performance-Datenbank für Wallets.
+    Verwaltet die Performance-Datenbank fuer Wallets.
 
     Confidence Score:
         - Win Rate:    45% Gewicht
-        - Avg P&L:     35% Gewicht (relativ zur Positionsgröße, logarithmisch)
-        - Trade Count: 20% Gewicht (sättigt bei 50 Trades)
-        - Minimum 5 Trades für echten Score, sonst 0.2 (unbekannt)
+        - Avg P&L:     35% Gewicht (relativ zur Positionsgroesse, logarithmisch)
+        - Trade Count: 20% Gewicht (saettigt bei 50 Trades)
+        - Minimum 5 Trades fuer echten Score, sonst 0.2 (unbekannt)
 
     Strategie-Label (ab 20 sauberen Trades):
-        ASYMMETRIC  – große Gewinne, begrenzte Verluste
-        RUNNER      – lässt Gewinne laufen, akzeptiert hohe Verluste
-        SCALPER     – konstante kleine Gewinne, enge Verluste
-        LOSS_MAKER  – überwiegend Verluste
-        MIXED       – kein klares Muster
-        UNKNOWN     – unter 20 saubere Trades
+        ASYMMETRIC  - grosse Gewinne, begrenzte Verluste
+        RUNNER      - laesst Gewinne laufen, akzeptiert hohe Verluste
+        SCALPER     - konstante kleine Gewinne, enge Verluste
+        LOSS_MAKER  - ueberwiegend Verluste
+        MIXED       - kein klares Muster
+        UNKNOWN     - unter 20 saubere Trades
 
     Dynamisches SL/TP (ab 20 sauberen Trades mit High/Low Daten):
         TP = 25. Perzentil der Gewinn-Exits
-             → 75% aller historischen Gewinne wurden sicher getriggert
+             -> 75% aller historischen Gewinne wurden sicher getriggert
         SL = 75. Perzentil der Trade-Lows (max. Drawdown der sich erholt hat)
-             → verhindert vorzeitiges Rausfliegen bei typischen Drawdowns
+             -> verhindert vorzeitiges Rausfliegen bei typischen Drawdowns
         Fallback: Label-basierte Defaults aus STRATEGY_SL_TP_DEFAULTS
     """
 
-    MIN_TRADES_FOR_SCORE    = 5    # Unter diesem Wert → neutraler Score 0.2
-    MIN_TRADES_FOR_LABEL    = 20   # Unter diesem Wert → UNKNOWN Label
-    MIN_TRADES_FOR_DYNAMIC  = 20   # Unter diesem Wert → Label-Defaults statt dynamisch
+    MIN_TRADES_FOR_SCORE   = 5    # Unter diesem Wert -> neutraler Score 0.2
+    MIN_TRADES_FOR_LABEL   = 20   # Unter diesem Wert -> UNKNOWN Label
+    MIN_TRADES_FOR_DYNAMIC = 20   # Unter diesem Wert -> Label-Defaults statt dynamisch
 
     def __init__(self, db_path: str = DB_PATH):
         self.db_path = db_path
@@ -130,7 +130,7 @@ class WalletTracker:
             )
         """)
 
-        # Migrationen für bestehende DBs
+        # Migrationen fuer bestehende DBs
         cursor.execute("PRAGMA table_info(wallet_trades)")
         trade_cols = [row['name'] for row in cursor.fetchall()]
         for col, typedef in [
@@ -160,7 +160,7 @@ class WalletTracker:
             )
         """)
 
-        # Migrationen für bestehende DBs
+        # Migrationen fuer bestehende DBs
         cursor.execute("PRAGMA table_info(wallet_stats)")
         stat_cols = [row['name'] for row in cursor.fetchall()]
         for col, typedef in [
@@ -172,7 +172,7 @@ class WalletTracker:
                 cursor.execute(f"ALTER TABLE wallet_stats ADD COLUMN {col} {typedef}")
                 logger.info(f"[WalletTracker] Migrated: added wallet_stats.{col}")
 
-        # Inaktivitäts-Tags pro Wallet
+        # Inaktivitaets-Tags pro Wallet
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS wallet_inactivity_tags (
                 wallet     TEXT PRIMARY KEY,
@@ -195,13 +195,13 @@ class WalletTracker:
         conn.close()
         logger.info("[WalletTracker] Database initialized")
 
-    # ──────────────────────────────────────────────────────────────────────
+    # -----------------------------------------------------------------------
     # TRADE RECORDING
-    # ──────────────────────────────────────────────────────────────────────
+    # -----------------------------------------------------------------------
 
     def record_buy(self, session_id: str, wallet: str, token: str,
                    amount: float, price_eur: float) -> int:
-        """Speichert einen BUY Trade. Gibt die Trade-ID zurück."""
+        """Speichert einen BUY Trade. Gibt die Trade-ID zurueck."""
         conn = self._connect()
         cursor = conn.cursor()
 
@@ -229,8 +229,8 @@ class WalletTracker:
         """
         Speichert einen SELL Trade und aktualisiert Wallet-Stats.
 
-        max_price_pct: höchster Preis während der Position in % (z.B. +120.0)
-        min_price_pct: niedrigster Preis während der Position in % (z.B. -38.0)
+        max_price_pct: hoechster Preis waehrend der Position in % (z.B. +120.0)
+        min_price_pct: niedrigster Preis waehrend der Position in % (z.B. -38.0)
         price_missing=True markiert Trades bei denen kein Preis abrufbar war
         """
         pnl_eur = (price_eur - entry_price_eur) * amount
@@ -258,9 +258,9 @@ class WalletTracker:
 
         self._recalculate_stats(wallet)
 
-    # ──────────────────────────────────────────────────────────────────────
+    # -----------------------------------------------------------------------
     # STATS & CONFIDENCE
-    # ──────────────────────────────────────────────────────────────────────
+    # -----------------------------------------------------------------------
 
     def _recalculate_stats(self, wallet: str):
         """Berechnet Stats, Confidence Score, Label und dynamisches SL/TP neu."""
@@ -286,7 +286,7 @@ class WalletTracker:
         avg_pnl   = total_pnl / total_trades
         win_rate  = len(winning) / total_trades
 
-        # ── Confidence Score ─────────────────────────────────────────────
+        # Confidence Score
         if total_trades < self.MIN_TRADES_FOR_SCORE:
             confidence = 0.2
         else:
@@ -298,10 +298,10 @@ class WalletTracker:
             pnl_score = min(pnl_score, 0.35)
             confidence = round(max(0.0, min(1.0, wr_score + count_score + pnl_score)), 4)
 
-        # ── Strategie-Label ──────────────────────────────────────────────
+        # Strategie-Label
         strategy_label = self._calculate_strategy_label(wallet, conn)
 
-        # ── Dynamisches SL/TP ────────────────────────────────────────────
+        # Dynamisches SL/TP
         dynamic_sl, dynamic_tp = self._calculate_dynamic_sl_tp(wallet, conn)
 
         cursor.execute("""
@@ -333,7 +333,7 @@ class WalletTracker:
         conn.close()
 
         logger.debug(
-            f"[WalletTracker] {wallet[:8]}... → "
+            f"[WalletTracker] {wallet[:8]}... -> "
             f"conf={confidence:.2f} | wr={win_rate:.0%} | trades={total_trades} | "
             f"avg_pnl={avg_pnl:+.2f} EUR | label={strategy_label} | "
             f"sl={dynamic_sl} tp={dynamic_tp}"
@@ -342,7 +342,7 @@ class WalletTracker:
     def _calculate_strategy_label(self, wallet: str, conn) -> str:
         """
         Berechnet das Strategie-Label aus sauberen Trades.
-        Berücksichtigt auch High/Low Daten für präzisere Klassifizierung.
+        Beruecksichtigt auch High/Low Daten fuer praezisere Klassifizierung.
         """
         cursor = conn.cursor()
         cursor.execute("""
@@ -371,36 +371,25 @@ class WalletTracker:
         gross_loss    = abs(sum(t['pnl_eur'] for t in trades if t['pnl_eur'] < 0))
         profit_factor = gross_profit / gross_loss if gross_loss > 0 else 999.0
 
-        # High/Low Daten für präzisere Klassifizierung
-        # Drawdown-Toleranz: Wallet hält Drawdowns aus bevor es sich erholt
-        lows_available = [t['min_price_pct'] for t in trades if t['min_price_pct'] is not None]
+        # High/Low Daten fuer praezisere Klassifizierung
+        lows_available  = [t['min_price_pct'] for t in trades if t['min_price_pct'] is not None]
         highs_available = [t['max_price_pct'] for t in trades if t['max_price_pct'] is not None]
 
-        # Median Drawdown = typischer maximaler Einbruch während einer Position
-        median_drawdown = statistics.median(lows_available) if lows_available else avg_loss
-        # Median High = wie weit geht ein Token typischerweise ins Plus bevor Wallet verkauft
-        median_high = statistics.median(highs_available) if highs_available else avg_win
+        median_drawdown = statistics.median(lows_available)  if lows_available  else avg_loss
+        median_high     = statistics.median(highs_available) if highs_available else avg_win
 
         # Klassifizierung
         if win_rate < 0.15:
             label = 'LOSS_MAKER'
 
         elif avg_win > 80 and abs(avg_loss) < 45 and profit_factor >= 1.0:
-            # ASYMMETRIC: Gute Gewinne, begrenzte Verluste
-            # Zusatz: median_drawdown sollte moderat sein (kein extremes Risiko)
             label = 'ASYMMETRIC'
 
         elif avg_win > 60 and abs(avg_loss) >= 35:
-            # Potentieller RUNNER – Wallet akzeptiert hohe Verluste
-            # Entscheidend: Hält es Drawdowns aus (median_drawdown tief) und
-            # lässt es wirklich laufen (median_high hoch)?
             if lows_available and highs_available:
-                # Echter RUNNER: median_high deutlich über avg_exit_win
-                # und Wallet hält Drawdowns > 40% aus
                 if median_high > avg_win * 0.8 and abs(median_drawdown) > 30:
                     label = 'RUNNER'
                 elif abs(median_drawdown) <= 30:
-                    # Hohe Verlust-Exits aber keine tiefen Drawdowns → eher MIXED
                     label = 'MIXED'
                 else:
                     label = 'RUNNER'
@@ -408,12 +397,9 @@ class WalletTracker:
                 label = 'RUNNER'
 
         elif avg_win <= 50 and abs(avg_loss) <= 25 and win_rate >= 0.50:
-            # SCALPER: Kleine Gewinne, enge Verluste, hohe Win-Rate
-            # Zusatz: median_drawdown sollte ebenfalls eng sein
             if lows_available and abs(median_drawdown) <= 35:
                 label = 'SCALPER'
             elif lows_available and abs(median_drawdown) > 35:
-                # Wartet auf sichere Trades aber hält gelegentlich starke Drawdowns aus
                 label = 'MIXED'
             else:
                 label = 'SCALPER'
@@ -434,15 +420,9 @@ class WalletTracker:
         Berechnet dynamisches SL/TP aus historischen Trade-Daten.
 
         TP = 25. Perzentil der Gewinn-Exits
-             → 75% aller historischen Gewinne lagen über diesem Wert
-             → konservativ, triggert sicher
-
         SL = 75. Perzentil der Trade-Lows (min_price_pct)
-             → 75% der Trades hatten einen Drawdown der nicht tiefer ging
-             → SL liegt unter dem typischen Drawdown, verhindert vorzeitiges Rausfliegen
-             → Fallback auf 75. Perzentil der Verlust-Exits wenn keine Low-Daten vorhanden
 
-        Gibt (None, None) zurück wenn zu wenig Daten.
+        Gibt (None, None) zurueck wenn zu wenig Daten.
         """
         cursor = conn.cursor()
         cursor.execute("""
@@ -461,29 +441,25 @@ class WalletTracker:
 
         pcts   = [t['pnl_percent'] for t in trades]
         wins   = sorted([p for p in pcts if p > 0])
-        losses = sorted([p for p in pcts if p < 0])  # aufsteigend (negativste zuerst)
+        losses = sorted([p for p in pcts if p < 0])
 
-        # ── Take-Profit: 25. Perzentil der Gewinne ──────────────────────
+        # Take-Profit: 25. Perzentil der Gewinne
         if wins:
             tp_idx = max(0, int(len(wins) * 0.25) - 1)
             raw_tp = wins[tp_idx]
-            # Sicherheitsgrenzen: TP mindestens +20%, maximal +300%
             dynamic_tp = round(max(20.0, min(300.0, raw_tp)), 1)
         else:
             dynamic_tp = None
 
-        # ── Stop-Loss: 75. Perzentil der Trade-Lows ─────────────────────
+        # Stop-Loss: 75. Perzentil der Trade-Lows
         lows = [t['min_price_pct'] for t in trades if t['min_price_pct'] is not None]
 
         if lows:
-            lows_sorted = sorted(lows)  # aufsteigend (negativste zuerst)
+            lows_sorted = sorted(lows)
             sl_idx = min(len(lows_sorted) - 1, int(len(lows_sorted) * 0.75))
             raw_sl = lows_sorted[sl_idx]
-            # Sicherheitsgrenzen: SL mindestens -10%, maximal -80%
-            # Ein Wallet das typischerweise -60% Drawdowns aushält bekommt SL bei -65%
-            dynamic_sl = round(max(-80.0, min(-10.0, raw_sl * 1.1)), 1)  # 10% Puffer
+            dynamic_sl = round(max(-80.0, min(-10.0, raw_sl * 1.1)), 1)
         elif losses:
-            # Fallback: 75. Perzentil der Verlust-Exits
             sl_idx = min(len(losses) - 1, int(len(losses) * 0.75))
             raw_sl = losses[sl_idx]
             dynamic_sl = round(max(-80.0, min(-10.0, raw_sl)), 1)
@@ -496,15 +472,15 @@ class WalletTracker:
         )
         return (dynamic_sl, dynamic_tp)
 
-    # ──────────────────────────────────────────────────────────────────────
+    # -----------------------------------------------------------------------
     # SL/TP GETTER
-    # ──────────────────────────────────────────────────────────────────────
+    # -----------------------------------------------------------------------
 
     def get_sl_tp_for_wallet(self, wallet: str) -> tuple:
         """
-        Gibt (stop_loss_pct, take_profit_pct) für ein Wallet zurück.
+        Gibt (stop_loss_pct, take_profit_pct) fuer ein Wallet zurueck.
 
-        Priorität:
+        Prioritaet:
         1. Dynamische Werte aus historischen Daten (wenn vorhanden)
         2. Label-basierte Defaults aus STRATEGY_SL_TP_DEFAULTS
         3. Globale Defaults
@@ -521,25 +497,20 @@ class WalletTracker:
         if not row:
             return (GLOBAL_SL_DEFAULT, GLOBAL_TP_DEFAULT)
 
-        # Dynamische Werte haben Priorität
         if row['dynamic_sl'] is not None and row['dynamic_tp'] is not None:
             return (row['dynamic_sl'], row['dynamic_tp'])
 
-        # Fallback: Label-Defaults
         label = row['strategy_label'] or 'UNKNOWN'
         return STRATEGY_SL_TP_DEFAULTS.get(label, (GLOBAL_SL_DEFAULT, GLOBAL_TP_DEFAULT))
 
     def get_sl_tp_for_wallets(self, wallets: list) -> tuple:
         """
-        Gibt gemittelten (stop_loss_pct, take_profit_pct) für mehrere Wallets.
-        Bevorzugt dynamische Werte. Ignoriert UNKNOWN ohne dynamische Werte
-        falls andere Wallets bessere Daten haben.
+        Gibt gemittelten (stop_loss_pct, take_profit_pct) fuer mehrere Wallets.
         """
         sl_tp_values = []
         for wallet in wallets:
             sl, tp = self.get_sl_tp_for_wallet(wallet)
             label = self.get_strategy_label(wallet)
-            # Nur einbeziehen wenn dynamisch ODER nicht UNKNOWN
             if label != 'UNKNOWN' or self._has_dynamic_sl_tp(wallet):
                 sl_tp_values.append((sl, tp))
 
@@ -652,15 +623,19 @@ class WalletTracker:
         conn.close()
         return [dict(r) for r in rows]
 
-    # ──────────────────────────────────────────────────────────────────────
-    # INAKTIVITÄTS-TAG SYSTEM
-    # ──────────────────────────────────────────────────────────────────────
+    # -----------------------------------------------------------------------
+    # INAKTIVITAETS-TAG SYSTEM
+    # -----------------------------------------------------------------------
 
     INACTIVITY_TIMEOUT_DEFAULT   = 600  # 10 Minuten
     INACTIVITY_TIMEOUT_PENALIZED = 300  # 5 Minuten bei 3 Tags
     INACTIVITY_MAX_TAGS          = 3
 
     def get_inactivity_timeout(self, wallets: list) -> int:
+        """
+        Gibt den Inaktivitaets-Timeout fuer eine Liste von Wallets zurueck.
+        Wenn mind. ein Wallet 3 Tags hat -> 5 Min, sonst 10 Min.
+        """
         conn = self._connect()
         cursor = conn.cursor()
         placeholders = ",".join("?" for _ in wallets)
@@ -687,7 +662,7 @@ class WalletTracker:
         new_tags = cursor.fetchone()['tags']
         conn.commit()
         conn.close()
-        logger.info(f"[WalletTracker] {wallet[:8]}... inactivity tag +1 → {new_tags}/{self.INACTIVITY_MAX_TAGS}")
+        logger.info(f"[WalletTracker] {wallet[:8]}... inactivity tag +1 -> {new_tags}/{self.INACTIVITY_MAX_TAGS}")
         return new_tags
 
     def remove_inactivity_tag(self, wallet: str) -> int:
@@ -703,7 +678,7 @@ class WalletTracker:
         new_tags = row['tags'] if row else 0
         conn.commit()
         conn.close()
-        logger.info(f"[WalletTracker] {wallet[:8]}... inactivity tag -1 → {new_tags}/{self.INACTIVITY_MAX_TAGS}")
+        logger.info(f"[WalletTracker] {wallet[:8]}... inactivity tag -1 -> {new_tags}/{self.INACTIVITY_MAX_TAGS}")
         return new_tags
 
     def get_inactivity_tags(self, wallet: str) -> int:

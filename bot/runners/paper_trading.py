@@ -51,14 +51,14 @@ class PaperTradingRunner:
         """Hauptloop"""
         
         print("="*70)
-        print("📊 PAPER TRADING MODE - Virtual Trading Test")
+        print(" PAPER TRADING MODE - Virtual Trading Test")
         print("="*70)
         print()
         
         # 1. Wallets laden
         active_wallets = sync_wallets()
         if not active_wallets:
-            logger.error("❌ No active wallets found!")
+            logger.error(" No active wallets found!")
             return
         
         wallet_addresses = [w.wallet for w in active_wallets]
@@ -92,13 +92,13 @@ class PaperTradingRunner:
         self.redundancy.on_signal = self._handle_signal
         
         print()
-        print("🧠 [Trading Engine] Activated")
+        print(" [Trading Engine] Activated")
         print(f"   Initial Capital: {initial_capital:.2f} EUR")
         print(f"   Position Size: {self.portfolio.position_size_percent*100:.0f}%")
         print(f"   Strategy: Follow lead wallets")
         print()
         
-        print("🧠 [Redundancy Engine] Activated")
+        print(" [Redundancy Engine] Activated")
         print(f"   Time Window: 30 seconds")
         print(f"   Min Wallets: 2")
         print(f"   Min Confidence: 50%")
@@ -142,7 +142,7 @@ class PaperTradingRunner:
     async def _handle_trade(self, trade: TradeEvent):
         """Handler für Trade Events"""
         # Log Trade
-        source_emoji = "🔵" if "fake" in trade.source else "🟢"
+        source_emoji = "" if "fake" in trade.source else ""
         logger.info(
             f"{source_emoji} [{trade.source:15}] {trade.wallet[:8]}... "
             f"{trade.side:4} {trade.amount:>8.2f} {trade.token[:8]}..."
@@ -175,7 +175,7 @@ class PaperTradingRunner:
         
         print()
         print("="*70)
-        print("🚨 STRONG BUY SIGNAL DETECTED!")
+        print(" STRONG BUY SIGNAL DETECTED!")
         print("="*70)
         print(f"Token:        {signal.token[:15]}...")
         print(f"Side:         {signal.side}")
@@ -243,12 +243,12 @@ class PaperTradingRunner:
 
         print("\n")
         print("="*70)
-        print("📊 PAPER TRADING SESSION ENDED")
+        print(" PAPER TRADING SESSION ENDED")
         print("="*70)
         
         # Close all open positions
         if self.portfolio and self.portfolio.positions:
-            print("\n📊 Closing all open positions...\n")
+            print("\n Closing all open positions...\n")
             for token in list(self.portfolio.positions.keys()):
                 price = await self.oracle.get_price_eur(token)
                 if price:
@@ -260,7 +260,7 @@ class PaperTradingRunner:
             print()
         
         # Stats
-        print(f"\n📈 Trading Statistics:")
+        print(f"\n Trading Statistics:")
         print(f"   Total Signals:    {self.total_signals}")
         print(f"   Total Buys:       {self.total_buys}")
         print(f"   Total Sells:      {self.total_sells}")
@@ -288,7 +288,7 @@ class PaperTradingRunner:
         if self.portfolio:
             filepath = f"data/paper_trading_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
             self.portfolio.save_to_file(filepath)
-            print(f"\n💾 Portfolio saved to: {filepath}\n")
+            print(f"\n Portfolio saved to: {filepath}\n")
         
         # Cleanup
         if self.oracle:

@@ -40,13 +40,13 @@ class PaperTradingEngine:
         self.position_trigger_wallets: Dict[str, Set[str]] = {}
 
         # Strategie-basierte SL/TP pro Token
-        # token → (stop_loss_pct, take_profit_pct)
+        # token  (stop_loss_pct, take_profit_pct)
         self.position_sl_tp: Dict[str, tuple] = {}
 
         # Inaktivitäts-Tracking pro Token
-        # token → letzter Preis bei dem eine Änderung festgestellt wurde
+        # token  letzter Preis bei dem eine Änderung festgestellt wurde
         self.position_last_changed_price: Dict[str, float] = {}
-        # token → Zeitpunkt der letzten Preisänderung
+        # token  Zeitpunkt der letzten Preisänderung
         self.position_last_changed_time: Dict[str, float] = {}
 
         # Price Update Loop
@@ -56,25 +56,25 @@ class PaperTradingEngine:
         logger.info("[PaperTradingEngine] Initialized")
     
     async def on_buy_signal(self, signal: TradeSignal):
-        """Reagiert auf BUY Signal – öffnet Position"""
+        """Reagiert auf BUY Signal  öffnet Position"""
         token = signal.token
         
         logger.info(
-            f"[TradingEngine] 🎯 BUY SIGNAL: {token[:8]}... "
+            f"[TradingEngine]  BUY SIGNAL: {token[:8]}... "
             f"from {signal.wallet_count} wallets"
         )
         
         if self.portfolio.has_position(token):
-            logger.info(f"[TradingEngine] ⏭️  Position already exists for {token[:8]}...")
+            logger.info(f"[TradingEngine]   Position already exists for {token[:8]}...")
             return
         
         price_eur = await self.oracle.get_price_eur(token)
         if price_eur is None:
-            logger.warning(f"[TradingEngine] ❌ No price available for {token[:8]}...")
+            logger.warning(f"[TradingEngine]  No price available for {token[:8]}...")
             return
         
         if not self.portfolio.can_open_position(token, price_eur):
-            logger.warning(f"[TradingEngine] ❌ Not enough capital for {token[:8]}...")
+            logger.warning(f"[TradingEngine]  Not enough capital for {token[:8]}...")
             return
         
         position = self.portfolio.open_position(
@@ -115,7 +115,7 @@ class PaperTradingEngine:
                     self.polling_source.pause_fake_trades()
             
             logger.info(
-                f"[TradingEngine] ✅ Opened position for {token[:8]}... "
+                f"[TradingEngine]  Opened position for {token[:8]}... "
                 f"@ {price_eur:.6f} EUR"
             )
     
@@ -138,13 +138,13 @@ class PaperTradingEngine:
         if wallet not in trigger_wallets:
             logger.debug(
                 f"[TradingEngine] Wallet {wallet[:8]}... sold {token[:8]}... "
-                f"but is not a trigger wallet → ignoring"
+                f"but is not a trigger wallet  ignoring"
             )
             return
         
         price_eur = await self.oracle.get_price_eur(token, skip_cache=True)
         if price_eur is None:
-            logger.warning(f"[TradingEngine] ❌ No price for exit on {token[:8]}...")
+            logger.warning(f"[TradingEngine]  No price for exit on {token[:8]}...")
             return
         
         await self._close_position(
@@ -165,7 +165,7 @@ class PaperTradingEngine:
         pnl_eur = (price_eur - entry_price) * position.amount
         
         # Emoji für Ergebnis
-        result_emoji = "✅" if pnl_eur >= 0 else "🛑"
+        result_emoji = "" if pnl_eur >= 0 else ""
         
         print()
         print("="*70)
@@ -215,13 +215,13 @@ class PaperTradingEngine:
                         self.polling_source.resume_fake_trades()
             
             logger.info(
-                f"[TradingEngine] ✅ Closed {token[:8]}... @ {price_eur:.8f} EUR "
+                f"[TradingEngine]  Closed {token[:8]}... @ {price_eur:.8f} EUR "
                 f"| P&L: {pnl_eur:+.2f} EUR ({pnl_pct:+.2f}%)"
             )
     
     async def _price_update_loop(self):
         """
-        🔄 PRICE UPDATE LOOP
+         PRICE UPDATE LOOP
         - Zeigt alle N Sekunden Price Updates
         - Prüft Stop-Loss und Take-Profit
         """
@@ -259,7 +259,7 @@ class PaperTradingEngine:
                         last_price = self.last_prices.get(token, entry_price)
                         price_change_pct = ((current_price - last_price) / last_price) * 100 if last_price > 0 else 0
                         
-                        emoji = "📈" if pnl_eur > 0 else "📉" if pnl_eur < 0 else "➡️"
+                        emoji = "" if pnl_eur > 0 else "" if pnl_eur < 0 else ""
                         
                         print(
                             f"{emoji} [PriceMonitor] {token[:8]}... @ {current_price:.8f} EUR "
@@ -271,7 +271,7 @@ class PaperTradingEngine:
 
                         import time
 
-                        # ─── INAKTIVITÄT ─────────────────────────────────────
+                        #  INAKTIVITÄT 
                         if current_price == self.position_last_changed_price.get(token):
                             trigger_wallets = list(self.position_trigger_wallets.get(token, set()))
                             timeout = (
@@ -281,14 +281,14 @@ class PaperTradingEngine:
                             inactive_secs = time.monotonic() - self.position_last_changed_time.get(token, time.monotonic())
                             if inactive_secs >= timeout:
                                 logger.warning(
-                                    f"[Inactivity] ⏱️ {token[:8]}... no price change for "
-                                    f"{inactive_secs/60:.1f} min (limit {timeout//60} min) – closing"
+                                    f"[Inactivity]  {token[:8]}... no price change for "
+                                    f"{inactive_secs/60:.1f} min (limit {timeout//60} min)  closing"
                                 )
                                 # Tags auf alle Trigger-Wallets
                                 if self.wallet_tracker:
                                     for w in trigger_wallets:
                                         tags = self.wallet_tracker.add_inactivity_tag(w)
-                                        logger.info(f"[Inactivity] Tag {w[:8]}... → {tags} tag(s)")
+                                        logger.info(f"[Inactivity] Tag {w[:8]}...  {tags} tag(s)")
                                 await self._close_position(
                                     token=token,
                                     price_eur=current_price,
@@ -297,7 +297,7 @@ class PaperTradingEngine:
                                 )
                                 continue
                         else:
-                            # Preis hat sich geändert – Timer zurücksetzen
+                            # Preis hat sich geändert  Timer zurücksetzen
                             self.position_last_changed_price[token] = current_price
                             self.position_last_changed_time[token]  = time.monotonic()
 
@@ -307,10 +307,10 @@ class PaperTradingEngine:
                             (self.stop_loss_percent, self.take_profit_percent)
                         )
 
-                        # ─── STOP-LOSS ────────────────────────────────────────
+                        #  STOP-LOSS 
                         if pnl_pct <= sl:
                             logger.warning(
-                                f"[StopLoss] 🛑 {token[:8]}... hit stop-loss "
+                                f"[StopLoss]  {token[:8]}... hit stop-loss "
                                 f"({pnl_pct:.1f}% <= {sl:.0f}%)"
                             )
                             await self._close_position(
@@ -321,10 +321,10 @@ class PaperTradingEngine:
                             )
                             continue
 
-                        # ─── TAKE-PROFIT ──────────────────────────────────────
+                        #  TAKE-PROFIT 
                         if pnl_pct >= tp:
                             logger.info(
-                                f"[TakeProfit] 🎯 {token[:8]}... hit take-profit "
+                                f"[TakeProfit]  {token[:8]}... hit take-profit "
                                 f"({pnl_pct:.1f}% >= +{tp:.0f}%)"
                             )
                             await self._close_position(
@@ -345,7 +345,7 @@ class PaperTradingEngine:
             logger.error(f"[PriceMonitor] Loop crashed: {e}")
     
     async def check_open_positions(self):
-        """Prüft offene Positionen – für externe Aufrufe"""
+        """Prüft offene Positionen  für externe Aufrufe"""
         if not self.portfolio.positions:
             return
         
@@ -359,7 +359,7 @@ class PaperTradingEngine:
             pnl_pct = position.pnl_percent(current_price)
             
             if abs(pnl_pct) >= 5:
-                emoji = "📈" if pnl > 0 else "📉"
+                emoji = "" if pnl > 0 else ""
                 logger.info(
                     f"[TradingEngine] {emoji} {token[:8]}... "
                     f"P&L: {pnl:+.2f} EUR ({pnl_pct:+.2f}%)"

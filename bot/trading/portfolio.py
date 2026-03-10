@@ -127,7 +127,7 @@ class PaperPortfolio:
         self.trade_history.append(trade)
         
         logger.info(
-            f"[PaperPortfolio] 🟢 BOUGHT {amount:.4f} {token[:8]}... "
+            f"[PaperPortfolio]  BOUGHT {amount:.4f} {token[:8]}... "
             f"@ {price_eur:.4f} EUR = {investment_eur:.2f} EUR"
         )
         logger.info(f"[PaperPortfolio] Cash remaining: {self.cash_eur:.2f} EUR")
@@ -165,7 +165,7 @@ class PaperPortfolio:
         # Position entfernen
         del self.positions[token]
         
-        emoji = "🟢" if pnl_eur >= 0 else "🔴"
+        emoji = "" if pnl_eur >= 0 else ""
         logger.info(
             f"[PaperPortfolio] {emoji} SOLD {trade.amount:.4f} {token[:8]}... "
             f"@ {price_eur:.4f} EUR = {sell_value_eur:.2f} EUR"
@@ -221,7 +221,7 @@ class PaperPortfolio:
         stats = self.get_statistics(token_prices)
         
         print("\n" + "="*70)
-        print("📊 PAPER TRADING PORTFOLIO SUMMARY")
+        print(" PAPER TRADING PORTFOLIO SUMMARY")
         print("="*70)
         print(f"Initial Capital:     {stats['initial_capital']:>12.2f} EUR")
         print(f"Current Cash:        {stats['current_cash']:>12.2f} EUR")
@@ -238,12 +238,12 @@ class PaperPortfolio:
         print("="*70)
         
         if self.positions:
-            print("\n📦 OPEN POSITIONS:")
+            print("\n OPEN POSITIONS:")
             for token, pos in self.positions.items():
                 current_price = token_prices.get(token, pos.entry_price_eur)
                 pnl = pos.pnl_eur(current_price)
                 pnl_pct = pos.pnl_percent(current_price)
-                emoji = "🟢" if pnl >= 0 else "🔴"
+                emoji = "" if pnl >= 0 else ""
                 print(f"{emoji} {token[:8]}... | Entry: {pos.entry_price_eur:.4f} EUR | "
                       f"Current: {current_price:.4f} EUR | P&L: {pnl:+.2f} EUR ({pnl_pct:+.2f}%)")
         

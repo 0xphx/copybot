@@ -129,7 +129,7 @@ class WalletActivityScanner:
         self.session = aiohttp.ClientSession()
         
         try:
-            print(f"\n🔍 Scanning {len(wallets)} wallets for activity in last {hours_back} hour(s)...")
+            print(f"\n Scanning {len(wallets)} wallets for activity in last {hours_back} hour(s)...")
             print("This may take a moment...\n")
             
             # Parallel scannen
@@ -143,7 +143,7 @@ class WalletActivityScanner:
             valid_results = []
             for result in results:
                 if isinstance(result, Exception):
-                    print(f"❌ Error: {result}")
+                    print(f" Error: {result}")
                 else:
                     valid_results.append(result)
             
@@ -161,17 +161,17 @@ def print_results(results: List[Dict], hours_back: int):
     inactive = [r for r in results if not r['active']]
     
     print("="*70)
-    print(f"📊 WALLET ACTIVITY REPORT (Last {hours_back} hour(s))")
+    print(f" WALLET ACTIVITY REPORT (Last {hours_back} hour(s))")
     print("="*70)
     print()
     
-    print(f"✅ Active Wallets:  {len(active)}/{len(results)}")
-    print(f"❌ Inactive Wallets: {len(inactive)}/{len(results)}")
+    print(f" Active Wallets:  {len(active)}/{len(results)}")
+    print(f" Inactive Wallets: {len(inactive)}/{len(results)}")
     print()
     
     if active:
         print("="*70)
-        print("🟢 ACTIVE WALLETS")
+        print(" ACTIVE WALLETS")
         print("="*70)
         
         # Sortiere nach Anzahl TXs
@@ -194,12 +194,12 @@ def print_results(results: List[Dict], hours_back: int):
             else:
                 time_str = "unknown"
             
-            print(f"🟢 {wallet[:8]}... | {tx_count} TXs | Latest: {time_str}")
+            print(f" {wallet[:8]}... | {tx_count} TXs | Latest: {time_str}")
     
     if inactive:
         print()
         print("="*70)
-        print(f"⚪ INACTIVE WALLETS (No activity in last {hours_back}h)")
+        print(f" INACTIVE WALLETS (No activity in last {hours_back}h)")
         print("="*70)
         
         for result in inactive:
@@ -218,21 +218,21 @@ def print_results(results: List[Dict], hours_back: int):
             else:
                 time_str = "never"
             
-            print(f"⚪ {wallet[:8]}... | Last activity: {time_str}")
+            print(f" {wallet[:8]}... | Last activity: {time_str}")
     
     print()
     print("="*70)
     
     # Empfehlungen
     if len(active) < len(results) * 0.3:  # Weniger als 30% aktiv
-        print("\n⚠️  LOW ACTIVITY WARNING")
+        print("\n  LOW ACTIVITY WARNING")
         print(f"   Only {len(active)}/{len(results)} wallets are active.")
         print("   Consider:")
         print("   - Waiting for more activity")
         print("   - Adding more active wallets")
         print("   - Using paper mode (hybrid) for testing")
     elif len(active) >= len(results) * 0.5:  # 50%+ aktiv
-        print("\n✅ GOOD ACTIVITY")
+        print("\n GOOD ACTIVITY")
         print(f"   {len(active)}/{len(results)} wallets are trading.")
         print("   Good time to start paper_mainnet mode!")
 
@@ -241,14 +241,14 @@ async def main():
     """Entry Point"""
     
     print("="*70)
-    print("🔍 WALLET ACTIVITY SCANNER")
+    print(" WALLET ACTIVITY SCANNER")
     print("="*70)
     print()
     
     # Lade Wallets
     wallets = sync_wallets()
     if not wallets:
-        print("❌ No wallets found in database!")
+        print(" No wallets found in database!")
         return
     
     wallet_addresses = [w.wallet for w in wallets]
@@ -286,4 +286,4 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         print("\n\nCancelled by user")
     except Exception as e:
-        print(f"\n❌ Error: {e}")
+        print(f"\n Error: {e}")

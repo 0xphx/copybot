@@ -113,7 +113,7 @@ try:
         async def test_ws(url, name):
             try:
                 print(f"\nTesting {name}: {url}")
-                print("  → Connecting...", end=" ")
+                print("   Connecting...", end=" ")
                 
                 # websockets 14.x proper fix: open_timeout parameter
                 ws = await websockets.connect(
@@ -125,7 +125,7 @@ try:
                 try:
                     print("[OK] CONNECTED")
                     
-                    print("  → Sending ping...", end=" ")
+                    print("   Sending ping...", end=" ")
                     pong_waiter = await ws.ping()
                     await asyncio.wait_for(pong_waiter, timeout=5)
                     print("[OK] PONG RECEIVED")
@@ -219,11 +219,11 @@ try:
     else:
         print("\n[OK] Try these options:")
         print("\n   OPTION A: Offline Mode (ALWAYS works)")
-        print("   → python main.py offline")
+        print("    python main.py offline")
         print("\n   OPTION B: Test Network (check WebSocket)")
-        print("   → python main.py test_network")
+        print("    python main.py test_network")
         print("\n   OPTION C: Live with Devnet")
-        print("   → python main.py live_rpc devnet")
+        print("    python main.py live_rpc devnet")
 
     print("\n" + "=" * 60)
     print("Report saved to: network_report.txt")

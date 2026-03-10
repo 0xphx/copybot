@@ -32,7 +32,7 @@ class TradeSignal:
     
     def __str__(self):
         return (
-            f"🎯 SIGNAL: {self.side} {self.token[:8]}... "
+            f" SIGNAL: {self.side} {self.token[:8]}... "
             f"| {self.wallet_count} wallets "
             f"| Avg: {self.avg_amount:.2f} "
             f"| Window: {self.time_window_seconds:.1f}s "
@@ -53,7 +53,7 @@ class RedundancyEngine:
         self.time_window = timedelta(seconds=time_window_seconds)
         self.min_wallets = min_wallets
         self.min_confidence = min_confidence
-        self.wallet_tracker = wallet_tracker  # Kann None sein → kein DB-Lookup
+        self.wallet_tracker = wallet_tracker  # Kann None sein  kein DB-Lookup
         self.recent_trades: Dict[tuple, List[TradeEvent]] = defaultdict(list)
         self.on_signal = None
         
@@ -154,9 +154,9 @@ class RedundancyEngine:
         Berechnet Confidence Score.
         
         Ohne WalletTracker (original Logik):
-            - Wallet Count Score  (0–50 Punkte)
-            - Timing Score        (10–30 Punkte)
-            - Konsistenz Score    (0–20 Punkte)
+            - Wallet Count Score  (050 Punkte)
+            - Timing Score        (1030 Punkte)
+            - Konsistenz Score    (020 Punkte)
         
         Mit WalletTracker (erweiterte Logik):
             - Historischer Wallet Performance Score ersetzt den einfachen
@@ -215,10 +215,10 @@ class RedundancyEngine:
         Wallets denselben Coin kaufen. Wallet-Qualität ist der Kernfaktor.
 
         Gewichtung:
-          55% – Historischer Wallet Confidence Score (Durchschnitt aller beteiligten Wallets)
-          25% – Wallet Count (mehr übereinstimmende gute Wallets = stärkeres Signal)
-          15% – Timing (Koordination, weniger kritisch als früher)
-           5% – Konsistenz der Trade-Größen (bei Memecoins kaum aussagekräftig)
+          55%  Historischer Wallet Confidence Score (Durchschnitt aller beteiligten Wallets)
+          25%  Wallet Count (mehr übereinstimmende gute Wallets = stärkeres Signal)
+          15%  Timing (Koordination, weniger kritisch als früher)
+           5%  Konsistenz der Trade-Größen (bei Memecoins kaum aussagekräftig)
         """
         
         import math
@@ -228,19 +228,19 @@ class RedundancyEngine:
 
         # 1. History Score (55%)
         # Durchschnitt der Wallet-Confidence-Scores aller beteiligten Wallets.
-        # Neutrale Wallets (0.5) dämpfen das Signal – kein Fallback mehr.
+        # Neutrale Wallets (0.5) dämpfen das Signal  kein Fallback mehr.
         # Nur wenn alle Wallets echte (nicht-neutrale) Scores haben ist das Signal stark.
         avg_hist_confidence = sum(conf_map.values()) / len(conf_map) if conf_map else 0.5
         history_score = avg_hist_confidence * 0.55
 
-        # 2. Wallet Count Score (25%) – logarithmisch
+        # 2. Wallet Count Score (25%)  logarithmisch
         # Mehr übereinstimmende gute Wallets = stärkeres Signal
         # 2 Wallets = 0.11, 3 = 0.16, 5 = 0.20, 10 = 0.25
         count_score = min(math.log(wallet_count + 1, 11), 1.0) * 0.25
 
         # 3. Timing Score (15%)
         # Wie koordiniert haben die Wallets gekauft?
-        # Weniger kritisch als bisher – ein gutes Wallet das 15s später kauft ist trotzdem wertvoll
+        # Weniger kritisch als bisher  ein gutes Wallet das 15s später kauft ist trotzdem wertvoll
         if window_seconds < 5:
             time_score = 0.15
         elif window_seconds < 15:
@@ -251,7 +251,7 @@ class RedundancyEngine:
             time_score = 0.02
 
         # 4. Konsistenz Score (5%)
-        # Bei Memecoins variieren Kaufmengen stark – kaum aussagekräftig
+        # Bei Memecoins variieren Kaufmengen stark  kaum aussagekräftig
         if amounts and len(amounts) > 1:
             avg = sum(amounts) / len(amounts)
             if avg > 0:
@@ -269,7 +269,7 @@ class RedundancyEngine:
             f"[RedundancyEngine] Confidence breakdown: "
             f"history={history_score:.2f} (avg_wallet={avg_hist_confidence:.2f}) "
             f"count={count_score:.2f} timing={time_score:.2f} "
-            f"consistency={consistency_score:.2f} → total={total:.2f}"
+            f"consistency={consistency_score:.2f}  total={total:.2f}"
         )
         
         return min(total, 1.0)

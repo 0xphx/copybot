@@ -70,7 +70,7 @@ def show_wallet_stats(filter_min_trades: int = 0, sort_by: str = "confidence"):
         f"  {'EV %':>{C_AVG}}"
         f"  {'Conf':>{C_CONF}}  {'Strategy':<{C_LABEL}}  {'SL':>{C_SL}}  {'TP':>{C_TP}}  Updated"
     )
-    divider = "  " + "─" * (C_IDX + C_WALLET + C_TRADES + C_WIN + C_AVG + C_CONF + C_LABEL + C_SL + C_TP + C_DATE + 22)
+    divider = "  " + "" * (C_IDX + C_WALLET + C_TRADES + C_WIN + C_AVG + C_CONF + C_LABEL + C_SL + C_TP + C_DATE + 22)
     print(header)
     print(divider)
 
@@ -135,7 +135,7 @@ def show_sessions():
         return
 
     print(f"  {'Session ID':<30} {'Wallets':>7} {'Trades':>6} {'SELLs':>6} {'P&L EUR':>10}  {'Gestartet'}")
-    print("  " + "─"*85)
+    print("  " + ""*85)
 
     for r in rows:
         pnl_str = f"{r['total_pnl']:+.2f}" if r['total_pnl'] else "   n/a"
@@ -166,12 +166,12 @@ def show_wallet_detail(wallet_prefix: str):
     matches = [r['wallet'] for r in cursor.fetchall()]
 
     if not matches:
-        print(f"  ❌ Kein Wallet gefunden für Prefix: '{wallet_prefix}'")
+        print(f"   Kein Wallet gefunden für Prefix: '{wallet_prefix}'")
         conn.close()
         return
 
     if len(matches) > 1:
-        print(f"  ⚠️  Mehrere Wallets gefunden – bitte längeren Prefix angeben:")
+        print(f"    Mehrere Wallets gefunden  bitte längeren Prefix angeben:")
         for m in matches:
             print(f"    {m}")
         conn.close()
@@ -192,7 +192,7 @@ def show_wallet_detail(wallet_prefix: str):
     trades = cursor.fetchall()
     conn.close()
 
-    print(f"  🔑 Wallet: {wallet}")
+    print(f"   Wallet: {wallet}")
     if stats:
         from trading.wallet_tracker import STRATEGY_SL_TP_DEFAULTS
         conf  = stats['confidence_score']
@@ -234,10 +234,10 @@ def show_wallet_detail(wallet_prefix: str):
 
     print()
     print(f"  {'Session':<25} {'Token':<12} {'Entry':>12} {'Exit':>12} {'P&L EUR':>10} {'P&L%':>8}  {'Datum'}")
-    print("  " + "─"*95)
+    print("  " + ""*95)
 
     for t in trades:
-        emoji  = "✅" if (t['pnl_eur'] or 0) >= 0 else "❌"
+        emoji  = "" if (t['pnl_eur'] or 0) >= 0 else ""
         pnl    = t['pnl_eur'] or 0
         pct    = t['pnl_percent'] or 0
         ts     = t['timestamp'][:16]
@@ -256,28 +256,28 @@ def show_wallet_detail(wallet_prefix: str):
 def print_help():
     print()
     print("="*60)
-    print("📊 WALLET DATABASE VIEWER")
+    print(" WALLET DATABASE VIEWER")
     print("="*60)
     print()
     print("Usage:")
-    print("  python main.py show_db                     – Alle Wallets (sortiert nach Confidence)")
-    print("  python main.py show_db pnl                 – Sortiert nach P&L")
-    print("  python main.py show_db winrate             – Sortiert nach Win-Rate")
-    print("  python main.py show_db trades              – Sortiert nach Trade-Anzahl")
-    print("  python main.py show_db --min 5             – Nur Wallets mit min. 5 Trades")
-    print("  python main.py show_db sessions            – Alle Sessions anzeigen")
-    print("  python main.py show_db wallet <PREFIX>     – Detail-Ansicht eines Wallets")
+    print("  python main.py show_db                      Alle Wallets (sortiert nach Confidence)")
+    print("  python main.py show_db pnl                  Sortiert nach P&L")
+    print("  python main.py show_db winrate              Sortiert nach Win-Rate")
+    print("  python main.py show_db trades               Sortiert nach Trade-Anzahl")
+    print("  python main.py show_db --min 5              Nur Wallets mit min. 5 Trades")
+    print("  python main.py show_db sessions             Alle Sessions anzeigen")
+    print("  python main.py show_db wallet <PREFIX>      Detail-Ansicht eines Wallets")
     print()
 
 
 def run(args: list):
-    """Entry Point – wird von main.py aufgerufen"""
+    """Entry Point  wird von main.py aufgerufen"""
 
     try:
         conn = connect()
         conn.close()
     except Exception:
-        print(f"\n❌ Datenbank nicht gefunden: {DB_PATH}")
+        print(f"\n Datenbank nicht gefunden: {DB_PATH}")
         print("   Starte zuerst: python main.py wallet_analysis\n")
         return
 
@@ -313,13 +313,13 @@ def run(args: list):
 
     if mode == "sessions":
         print("="*70)
-        print("📋 SESSION ÜBERSICHT")
+        print(" SESSION ÜBERSICHT")
         print("="*70)
         show_sessions()
 
     elif mode == "wallet":
         print("="*70)
-        print("🔍 WALLET DETAIL")
+        print(" WALLET DETAIL")
         print("="*70)
         show_wallet_detail(wallet_prefix)
 
@@ -331,7 +331,7 @@ def run(args: list):
             "trades":     "Trade Anzahl",
         }
         print("="*70)
-        print(f"📊 WALLET DATENBANK  –  sortiert nach {sort_labels.get(sort_by, sort_by)}")
+        print(f" WALLET DATENBANK    sortiert nach {sort_labels.get(sort_by, sort_by)}")
         print("="*70)
         show_wallet_stats(min_trades, sort_by)
 

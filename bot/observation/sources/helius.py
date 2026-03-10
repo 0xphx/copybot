@@ -24,6 +24,6 @@ class HeliusTradeSource(TradeSource):
 
     def listen(self):
         """
-        Wird nicht genutzt – Helius pusht Events.
+        Wird nicht genutzt  Helius pusht Events.
         """
         raise NotImplementedError("Helius uses webhooks, not polling")
