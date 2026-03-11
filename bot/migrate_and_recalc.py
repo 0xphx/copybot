@@ -1,14 +1,15 @@
 """
-Einmalig ausführen: Migriert DB-Schema und berechnet alle Stats neu
+Einmalig ausfuehren: Migriert DB-Schema und berechnet alle Stats neu
 mit der neuen Label-Logik (High/Low-basiert) + dynamischen SL/TP.
 
-cd C:\Users\phili\Documents\GitHub\copybot\bot
+cd .../copybot/bot
 python migrate_and_recalc.py
 """
 import sqlite3, math, statistics, sys
 from datetime import datetime
 
-DB_PATH = "data/wallet_performance.db"
+DB_PATH       = "data/observer_performance.db" if "--observer" in sys.argv else "data/wallet_performance.db"
+OBSERVER_MODE = "--observer" in sys.argv
 POSITION_SIZE_EUR = 200.0
 
 def migrate(conn):
@@ -113,11 +114,25 @@ def main():
         else:
             wr_s = win_rate * 0.45
             c_s  = min(total/50,1.0)*0.20
-            p_s  = min((math.log2(1+max((avg_pnl/POSITION_SIZE_EUR)*100,0)/25)/math.log2(21))*0.35, 0.35)
+            # Winsorizing auf 95. Perzentil (identisch zu wallet_tracker.py)
+            pnl_pcts_all = sorted(t[1] for t in trades if t[1] is not None)
+            if pnl_pcts_all:
+                cap_idx = min(len(pnl_pcts_all)-1, int(len(pnl_pcts_all)*0.95))
+                cap_pct = pnl_pcts_all[cap_idx]
+                avg_capped = sum(min(p, cap_pct) for p in pnl_pcts_all) / len(pnl_pcts_all)
+            else:
+                avg_capped = 0.0
+            p_s  = min((math.log2(1+max(avg_capped,0)/25)/math.log2(21))*0.35, 0.35)
             conf = round(max(0.0, min(1.0, wr_s+c_s+p_s)), 4)
 
-        label          = calc_label(trades)
-        dyn_sl, dyn_tp = calc_sl_tp(trades)
+        # Observer-DB: Label + SL/TP nicht berechnen (Exits durch Wallet/Timeouts)
+        if OBSERVER_MODE:
+            label  = 'OBSERVER'
+            dyn_sl = None
+            dyn_tp = None
+        else:
+            label          = calc_label(trades)
+            dyn_sl, dyn_tp = calc_sl_tp(trades)
         n_lows  = sum(1 for t in trades if t[3] is not None)
         n_highs = sum(1 for t in trades if t[4] is not None)
 
@@ -145,10 +160,11 @@ def main():
     conn.close()
 
     print(f"\n{'='*70}")
-    print("✅ Fertig – Stats aktualisiert")
+    print("[OK] Fertig - Stats aktualisiert")
     print()
     print("Hinweis: dyn_SL/TP basieren noch auf Verlust-Exits (keine lows/highs in DB).")
-    print("Ab der nächsten Analyse-Session werden echte High/Low Werte getrackt.")
+    print("Ab der naechsten Session werden echte High/Low Werte getrackt.")
+    print("DB: " + DB_PATH)
     print(f"{'='*70}\n")
 
 if __name__ == "__main__":

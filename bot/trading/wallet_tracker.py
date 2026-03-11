@@ -71,9 +71,11 @@ class WalletTracker:
 
     Confidence Score:
         - Win Rate:    45% Gewicht
-        - Avg P&L:     35% Gewicht (relativ zur Positionsgroesse, logarithmisch)
+        - Avg P&L:     35% Gewicht (logarithmisch, Winsorizing auf 95. Perzentil)
         - Trade Count: 20% Gewicht (saettigt bei 50 Trades)
         - Minimum 5 Trades fuer echten Score, sonst 0.2 (unbekannt)
+        - Winsorizing: pnl_percent Werte werden auf das 95. Perzentil gedeckelt
+          bevor avg berechnet wird. avg_pnl_eur in der DB bleibt unveraendert.
 
     Strategie-Label (ab 20 sauberen Trades):
         ASYMMETRIC  - grosse Gewinne, begrenzte Verluste
@@ -88,17 +90,34 @@ class WalletTracker:
              -> 75% aller historischen Gewinne wurden sicher getriggert
         SL = 75. Perzentil der Trade-Lows (max. Drawdown der sich erholt hat)
              -> verhindert vorzeitiges Rausfliegen bei typischen Drawdowns
-        Fallback: Label-basierte Defaults aus STRATEGY_SL_TP_DEFAULTS
+
+        Prioritaet SL/TP (get_sl_tp_for_wallet):
+        1. Dynamische Werte aus Analysis-DB
+        2. Aus Observer-DB berechnet (wenn observer_db_path gesetzt
+           und >= MIN_OBSERVER_TRADES_FOR_SL_TP=15 saubere Trades)
+           Nutzt echte High/Low Daten + Winsorizing auf 95. Perzentil
+        3. Label-basierte Defaults aus STRATEGY_SL_TP_DEFAULTS
+        4. Globale Defaults (-50% / +100%)
     """
 
     MIN_TRADES_FOR_SCORE   = 5    # Unter diesem Wert -> neutraler Score 0.2
     MIN_TRADES_FOR_LABEL   = 20   # Unter diesem Wert -> UNKNOWN Label
     MIN_TRADES_FOR_DYNAMIC = 20   # Unter diesem Wert -> Label-Defaults statt dynamisch
 
-    def __init__(self, db_path: str = DB_PATH):
-        self.db_path = db_path
+    # Mindestanzahl Observer-Trades fuer SL/TP-Uebernahme in Analysis-Modus
+    MIN_OBSERVER_TRADES_FOR_SL_TP = 15
+
+    def __init__(self, db_path: str = DB_PATH, observer_mode: bool = False,
+                 observer_db_path: Optional[str] = None):
+        self.db_path          = db_path
+        self.observer_mode    = observer_mode
+        # Pfad zur Observer-DB fuer SL/TP-Fallback im Analysis-Modus.
+        # Wenn None: kein Observer-Fallback.
+        self.observer_db_path = observer_db_path
         self._init_db()
-        logger.info(f"[WalletTracker] Initialized ({db_path})")
+        mode_str = "OBSERVER" if observer_mode else "ANALYSIS"
+        obs_str  = f" observer_fallback={observer_db_path}" if observer_db_path else ""
+        logger.info(f"[WalletTracker] Initialized ({db_path}) mode={mode_str}{obs_str}")
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path)
@@ -292,17 +311,33 @@ class WalletTracker:
         else:
             wr_score    = win_rate * 0.45
             count_score = min(total_trades / 50, 1.0) * 0.20
-            avg_pnl_pct = (avg_pnl / POSITION_SIZE_EUR) * 100
-            avg_pnl_pct_pos = max(avg_pnl_pct, 0.0)
+
+            # pnl_score: Winsorizing auf 95. Perzentil der pnl_percent-Werte
+            # Verhindert dass einzelne Ausreisser (z.B. +764.000%) den Score verzerren.
+            # avg_pnl_eur in der DB bleibt der echte Wert (nur Score wird gecapped).
+            pnl_pcts = sorted(r['pnl_percent'] for r in rows if r['pnl_percent'] is not None)
+            if pnl_pcts:
+                cap_idx = min(len(pnl_pcts) - 1, int(len(pnl_pcts) * 0.95))
+                cap_pct = pnl_pcts[cap_idx]
+                pnl_pcts_capped = [min(p, cap_pct) for p in pnl_pcts]
+                avg_pnl_pct_capped = sum(pnl_pcts_capped) / len(pnl_pcts_capped)
+            else:
+                avg_pnl_pct_capped = 0.0
+            avg_pnl_pct_pos = max(avg_pnl_pct_capped, 0.0)
             pnl_score = (math.log2(1 + avg_pnl_pct_pos / 25) / math.log2(21)) * 0.35
             pnl_score = min(pnl_score, 0.35)
             confidence = round(max(0.0, min(1.0, wr_score + count_score + pnl_score)), 4)
 
-        # Strategie-Label
-        strategy_label = self._calculate_strategy_label(wallet, conn)
-
-        # Dynamisches SL/TP
-        dynamic_sl, dynamic_tp = self._calculate_dynamic_sl_tp(wallet, conn)
+        # Strategie-Label + dynamisches SL/TP
+        # Im Observer-Modus nicht berechnen: Exits entstehen durch Wallet-Verhalten
+        # oder Timeouts, nicht durch Bot-Entscheidungen -> Werte waeren bedeutungslos.
+        if self.observer_mode:
+            strategy_label = 'OBSERVER'
+            dynamic_sl     = None
+            dynamic_tp     = None
+        else:
+            strategy_label = self._calculate_strategy_label(wallet, conn)
+            dynamic_sl, dynamic_tp = self._calculate_dynamic_sl_tp(wallet, conn)
 
         cursor.execute("""
             INSERT INTO wallet_stats
@@ -481,9 +516,11 @@ class WalletTracker:
         Gibt (stop_loss_pct, take_profit_pct) fuer ein Wallet zurueck.
 
         Prioritaet:
-        1. Dynamische Werte aus historischen Daten (wenn vorhanden)
-        2. Label-basierte Defaults aus STRATEGY_SL_TP_DEFAULTS
-        3. Globale Defaults
+        1. Dynamische Werte aus Analysis-DB (wenn vorhanden)
+        2. Dynamische Werte aus Observer-DB (wenn observer_db_path gesetzt
+           und >= MIN_OBSERVER_TRADES_FOR_SL_TP saubere Trades vorhanden)
+        3. Label-basierte Defaults aus STRATEGY_SL_TP_DEFAULTS
+        4. Globale Defaults
         """
         conn = self._connect()
         cursor = conn.cursor()
@@ -494,14 +531,89 @@ class WalletTracker:
         row = cursor.fetchone()
         conn.close()
 
-        if not row:
-            return (GLOBAL_SL_DEFAULT, GLOBAL_TP_DEFAULT)
-
-        if row['dynamic_sl'] is not None and row['dynamic_tp'] is not None:
+        # 1. Dynamische Werte aus Analysis-DB
+        if row and row['dynamic_sl'] is not None and row['dynamic_tp'] is not None:
+            logger.debug(f"[WalletTracker] {wallet[:8]}... SL/TP from analysis-db")
             return (row['dynamic_sl'], row['dynamic_tp'])
 
-        label = row['strategy_label'] or 'UNKNOWN'
+        # 2. Observer-DB als Fallback
+        obs = self._get_observer_sl_tp(wallet)
+        if obs is not None:
+            logger.debug(f"[WalletTracker] {wallet[:8]}... SL/TP from observer-db: {obs}")
+            return obs
+
+        # 3. Label-basierte Defaults
+        label = (row['strategy_label'] if row else None) or 'UNKNOWN'
         return STRATEGY_SL_TP_DEFAULTS.get(label, (GLOBAL_SL_DEFAULT, GLOBAL_TP_DEFAULT))
+
+    def _get_observer_sl_tp(self, wallet: str) -> Optional[tuple]:
+        """
+        Berechnet SL/TP aus der Observer-DB fuer ein Wallet.
+        Gibt None zurueck wenn:
+        - observer_db_path nicht gesetzt
+        - Wallet nicht in Observer-DB
+        - Zu wenig saubere Trades (< MIN_OBSERVER_TRADES_FOR_SL_TP)
+        - Keine High/Low Daten verfuegbar
+        """
+        if not self.observer_db_path:
+            return None
+
+        try:
+            obs_conn = sqlite3.connect(self.observer_db_path)
+            obs_conn.row_factory = sqlite3.Row
+            obs_cursor = obs_conn.cursor()
+
+            obs_cursor.execute("""
+                SELECT pnl_percent, min_price_pct
+                FROM wallet_trades
+                WHERE wallet = ? AND side = 'SELL'
+                  AND pnl_eur IS NOT NULL
+                  AND price_missing = 0
+                  AND pnl_percent != 0
+                ORDER BY timestamp DESC
+            """, (wallet,))
+            trades = obs_cursor.fetchall()
+            obs_conn.close()
+        except Exception as e:
+            logger.warning(f"[WalletTracker] Observer-DB Fehler fuer {wallet[:8]}: {e}")
+            return None
+
+        if len(trades) < self.MIN_OBSERVER_TRADES_FOR_SL_TP:
+            return None
+
+        pcts  = [t['pnl_percent'] for t in trades]
+        wins  = sorted([p for p in pcts if p > 0])
+        lows  = [t['min_price_pct'] for t in trades if t['min_price_pct'] is not None]
+        losses = sorted([p for p in pcts if p < 0])
+
+        # TP: 25. Perzentil der Gewinne (Winsorized auf 95. Perzentil)
+        if wins:
+            cap_idx   = min(len(wins) - 1, int(len(wins) * 0.95))
+            wins_cap  = [min(p, wins[cap_idx]) for p in wins]
+            tp_idx    = max(0, int(len(wins_cap) * 0.25) - 1)
+            raw_tp    = wins_cap[tp_idx]
+            dynamic_tp = round(max(20.0, min(300.0, raw_tp)), 1)
+        else:
+            return None  # Ohne Gewinne kein sinnvoller TP
+
+        # SL: 75. Perzentil der Trade-Lows (bevorzugt) oder Verlust-Exits
+        if lows:
+            lows_sorted = sorted(lows)
+            sl_idx      = min(len(lows_sorted) - 1, int(len(lows_sorted) * 0.75))
+            raw_sl      = lows_sorted[sl_idx]
+            dynamic_sl  = round(max(-80.0, min(-10.0, raw_sl * 1.1)), 1)
+        elif losses:
+            sl_idx     = min(len(losses) - 1, int(len(losses) * 0.75))
+            raw_sl     = losses[sl_idx]
+            dynamic_sl = round(max(-80.0, min(-10.0, raw_sl)), 1)
+        else:
+            return None
+
+        logger.info(
+            f"[WalletTracker] {wallet[:8]}... observer SL/TP berechnet: "
+            f"SL={dynamic_sl} TP={dynamic_tp} (n={len(trades)}, lows={len(lows)})"
+        )
+        return (dynamic_sl, dynamic_tp)
 
     def get_sl_tp_for_wallets(self, wallets: list) -> tuple:
         """

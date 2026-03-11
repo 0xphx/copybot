@@ -9,9 +9,10 @@
 import sqlite3
 import math
 import statistics
+import sys
 from datetime import datetime
 
-DB_PATH = "data/wallet_performance.db"
+DB_PATH = "data/observer_performance.db" if "--observer" in sys.argv else "data/wallet_performance.db"
 PRE_SL_CUTOFF = "2026-03-03"
 
 POSITION_SIZE_EUR = 200.0
@@ -150,7 +151,15 @@ def main():
         else:
             wr_s = win_rate * 0.45
             c_s  = min(total / 50, 1.0) * 0.20
-            p_s  = min((math.log2(1 + max((avg_pnl / POSITION_SIZE_EUR) * 100, 0) / 25) / math.log2(21)) * 0.35, 0.35)
+            # Winsorizing auf 95. Perzentil (identisch zu wallet_tracker.py)
+            pnl_pcts_all = sorted(t['pnl_percent'] for t in trades if t['pnl_percent'] is not None)
+            if pnl_pcts_all:
+                cap_idx = min(len(pnl_pcts_all)-1, int(len(pnl_pcts_all)*0.95))
+                cap_pct = pnl_pcts_all[cap_idx]
+                avg_capped = sum(min(p, cap_pct) for p in pnl_pcts_all) / len(pnl_pcts_all)
+            else:
+                avg_capped = 0.0
+            p_s  = min((math.log2(1 + max(avg_capped, 0) / 25) / math.log2(21)) * 0.35, 0.35)
             conf = round(max(0.0, min(1.0, wr_s + c_s + p_s)), 4)
 
         label          = calc_label(trades)
@@ -198,7 +207,7 @@ def main():
 
     print()
     print("=" * 70)
-    print("Fertig - DB bereinigt und Stats aktualisiert")
+    print("Fertig - DB bereinigt und Stats aktualisiert: " + DB_PATH)
     print("=" * 70)
     print()
 
