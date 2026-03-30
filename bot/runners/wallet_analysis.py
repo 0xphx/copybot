@@ -16,8 +16,8 @@ Zwei Modi waehlbar beim Start:
     Session-ID Prefix: 'observer_'
 
     Timeout-Mechanismen (schliessen mit aktuellem Preis):
-      - Preis-Stagnation: kein Preischange > 30 Min -> schliessen (OBSERVER_STAGNATION)
-      - Max-Haltedauer:   Position > 60 Min offen  -> schliessen (OBSERVER_MAX_HOLD)
+      - Preis-Stagnation: kein Preischange > 15 Min -> schliessen (OBSERVER_STAGNATION)
+      - Max-Haltedauer:   Position > 60 Min offen  -> schliessen (OBSERVER_MAX_HOLD, anpassbar beim Start)
 
     Anti-Softlock (schliessen mit Totalverlust):
       - Kein Preis nach 10 Versuchen:  Totalverlust (0 EUR), price_missing=True
@@ -146,9 +146,10 @@ class WalletAnalysisRunner:
     # Observer: nach dieser Zeit ohne JEGLICHEN Preis -> Totalverlust (Anti-Softlock)
     OBSERVER_MAX_NO_PRICE_MINUTES = 30
     # Observer: Position nach dieser Zeit schliessen (aktueller Preis), egal was
-    OBSERVER_MAX_HOLD_MINUTES = 60
+    # Anpassbar beim Start via Konfiguration
+    OBSERVER_MAX_HOLD_MINUTES_DEFAULT = 60
     # Observer: Position schliessen wenn Preis sich X Min nicht veraendert hat
-    OBSERVER_STAGNATION_MINUTES = 30
+    OBSERVER_STAGNATION_MINUTES = 15
 
     def __init__(self):
         self.shutting_down  = False
@@ -161,23 +162,26 @@ class WalletAnalysisRunner:
         self.accounts: Dict[str, WalletAccount] = {}
 
         self.max_positions: int = 1
-        # token -> (account, last_price)
-        self.open_positions:    Dict[str, tuple] = {}
-        self.price_fail_counts: Dict[str, int]   = {}
+        # (token, wallet) -> (account, last_price)
+        self.open_positions:    Dict[tuple, tuple] = {}
+        self.price_fail_counts: Dict[tuple, int]   = {}
 
-        # Inaktivitaets-Tracking: token -> (letzter_preis, monotonic_time)
-        self.inactivity_tracker: Dict[str, tuple] = {}
+        # Inaktivitaets-Tracking: (token, wallet) -> (letzter_preis, monotonic_time)
+        self.inactivity_tracker: Dict[tuple, tuple] = {}
 
-        # High/Low Tracking: token -> (max_price_pct, min_price_pct)
-        self.price_extremes: Dict[str, tuple] = {}
+        # High/Low Tracking: (token, wallet) -> (max_price_pct, min_price_pct)
+        self.price_extremes: Dict[tuple, tuple] = {}
 
-        # Observer Anti-Softlock: token -> monotonic_time des letzten erfolgreichen Preisabrufs
-        self.observer_last_price_time: Dict[str, float] = {}
+        # Observer Anti-Softlock: (token, wallet) -> monotonic_time des letzten Preisabrufs
+        self.observer_last_price_time: Dict[tuple, float] = {}
 
-        # Observer Timeouts: token -> monotonic_time des BUY (fuer Max-Haltedauer)
-        self.observer_entry_time: Dict[str, float] = {}
-        # Observer Stagnation: token -> (letzter_preis, monotonic_time_letzter_preischange)
-        self.observer_stagnation_tracker: Dict[str, tuple] = {}
+        # Observer Timeouts: (token, wallet) -> monotonic_time des BUY
+        self.observer_entry_time: Dict[tuple, float] = {}
+        # Observer Stagnation: (token, wallet) -> (letzter_preis, monotonic_time)
+        self.observer_stagnation_tracker: Dict[tuple, tuple] = {}
+
+        # Observer Max-Hold: anpassbar beim Start, Default aus Klassen-Konstante
+        self.observer_max_hold_minutes: int = self.OBSERVER_MAX_HOLD_MINUTES_DEFAULT
 
         self.active_token:   Optional[str]           = None
         self.active_account: Optional[WalletAccount] = None
@@ -239,6 +243,9 @@ class WalletAnalysisRunner:
             self.accounts[w] = WalletAccount(wallet=w)
 
         logger.info(f"[Wallets] Loaded {len(wallet_addresses)} wallets")
+
+        # Crash-Recovery: verwaiste BUYs aus abgebrochenen Sessions schliessen
+        self._recover_orphaned_positions()
 
         self.connection_monitor = ConnectionHealthMonitor(
             emergency_callback=self._emergency_close_all_positions,
@@ -316,8 +323,37 @@ class WalletAnalysisRunner:
                 except ValueError:
                     print("    Bitte eine ganze Zahl eingeben!")
         else:
-            # Observer: unbegrenzte Positionen (jedes Wallet kann unabhaengig handeln)
-            self.max_positions = 9999
+            # Observer: konfigurierbare Max-Positionen
+            while True:
+                inp = input(" Max. gleichzeitige Positionen [5]: ").strip()
+                if not inp:
+                    self.max_positions = 5
+                    break
+                try:
+                    v = int(inp)
+                    if v < 1:
+                        print("    Muss mindestens 1 sein!")
+                        continue
+                    self.max_positions = v
+                    break
+                except ValueError:
+                    print("    Bitte eine ganze Zahl eingeben!")
+
+        if self.observer_mode:
+            while True:
+                inp = input(f" Max-Haltedauer pro Position (Minuten) [{self.OBSERVER_MAX_HOLD_MINUTES_DEFAULT}]: ").strip()
+                if not inp:
+                    self.observer_max_hold_minutes = self.OBSERVER_MAX_HOLD_MINUTES_DEFAULT
+                    break
+                try:
+                    v = int(inp)
+                    if v < 1:
+                        print("    Muss mindestens 1 Minute sein!")
+                        continue
+                    self.observer_max_hold_minutes = v
+                    break
+                except ValueError:
+                    print("    Bitte eine ganze Zahl eingeben!")
 
         while True:
             inp = input("  Connection Timeout (Sekunden) [30]: ").strip()
@@ -340,8 +376,9 @@ class WalletAnalysisRunner:
             print("  OBSERVER MODE")
             print("   Folgt Wallet 1:1 (BUY/SELL exakt nach Wallet)")
             print("   Kein eigener SL / TP / Inaktivitaets-Timeout")
+            print(f"   Max. Positionen:     {self.max_positions}")
             print(f"   Stagnation-Timeout:  {self.OBSERVER_STAGNATION_MINUTES} Min kein Preischange -> schliessen (aktueller Preis)")
-            print(f"   Max-Haltedauer:      {self.OBSERVER_MAX_HOLD_MINUTES} Min -> schliessen (aktueller Preis)")
+            print(f"   Max-Haltedauer:      {self.observer_max_hold_minutes} Min -> schliessen (aktueller Preis)")
             print(f"   Anti-Softlock:       Totalverlust nach {self.OBSERVER_MAX_PRICE_FAILURES}x kein Preis")
             print(f"   Anti-Softlock:       Totalverlust nach {self.OBSERVER_MAX_NO_PRICE_MINUTES} Min ohne Preis")
             print(f"   Session-ID Prefix: observer_")
@@ -371,7 +408,8 @@ class WalletAnalysisRunner:
             print("   No open positions to close.")
             return
 
-        for token, (account, last_price) in list(self.open_positions.items()):
+        for key, (account, last_price) in list(self.open_positions.items()):
+            token = key[0]
             # Letzten bekannten Preis verwenden  realistischer als 0
             # (Verbindung war kurz weg, Preis vor Ausfall ist beste Näherung)
             print(f"    Force closed {token[:8]}... @ {last_price:.8f} EUR (last known price)")
@@ -399,7 +437,8 @@ class WalletAnalysisRunner:
         logger.info("[MissedSells] Checking for missed SELLs during offline period...")
         missed = 0
 
-        for token, (account, _) in list(self.open_positions.items()):
+        for key, (account, _) in list(self.open_positions.items()):
+            token  = key[0]
             wallet = account.wallet
             try:
                 async with aiohttp.ClientSession() as session:
@@ -475,7 +514,8 @@ class WalletAnalysisRunner:
             hasattr(self.source, 'is_fast_polling') and
             self.source.is_fast_polling
         )
-        if not in_fast_mode or trade.token in self.open_positions:
+        pos_key = (trade.token, trade.wallet)
+        if not in_fast_mode or pos_key in self.open_positions:
             logger.info(
                 f" [analysis] {trade.wallet[:8]}... "
                 f"{trade.side:4} {trade.amount:>12.2f} {trade.token[:8]}..."
@@ -487,11 +527,12 @@ class WalletAnalysisRunner:
             await self._handle_sell(account, trade.token)
 
     async def _handle_buy(self, account: WalletAccount, token: str):
-        # Im Analysis-Modus: globales Positions-Limit pruefen
-        if not self.observer_mode and len(self.open_positions) >= self.max_positions:
+        # Globales Positions-Limit (gilt fuer Analysis- und Observer-Modus)
+        if len(self.open_positions) >= self.max_positions:
             return
-        # Doppel-BUY desselben Tokens vom selben Wallet ignorieren
-        if token in self.open_positions and self.open_positions[token][0] == account:
+        # Dieses Wallet hat diesen Token bereits offen -> ignorieren
+        key = (token, account.wallet)
+        if key in self.open_positions:
             return
 
         price_eur = await self.oracle.get_price_eur(token)
@@ -505,22 +546,23 @@ class WalletAnalysisRunner:
             return
 
         import time
-        self.open_positions[token]    = (account, price_eur)
-        self.price_fail_counts[token] = 0
+        key = (token, account.wallet)
+        self.open_positions[key]    = (account, price_eur)
+        self.price_fail_counts[key] = 0
         self.total_buys += 1
         self.oracle.set_rate_limit_from_positions(len(self.open_positions))
 
         # High/Low Tracking initialisieren
-        self.price_extremes[token] = (0.0, 0.0)
+        self.price_extremes[key] = (0.0, 0.0)
 
         if self.observer_mode:
             # Observer: alle Timer starten
-            self.observer_last_price_time[token]    = time.monotonic()
-            self.observer_entry_time[token]          = time.monotonic()
-            self.observer_stagnation_tracker[token]  = (price_eur, time.monotonic())
+            self.observer_last_price_time[key]    = time.monotonic()
+            self.observer_entry_time[key]          = time.monotonic()
+            self.observer_stagnation_tracker[key]  = (price_eur, time.monotonic())
         else:
             # Analysis: Inaktivitaets-Timer starten
-            self.inactivity_tracker[token] = (price_eur, time.monotonic())
+            self.inactivity_tracker[key] = (price_eur, time.monotonic())
 
         self.active_token   = token
         self.active_account = account
@@ -535,7 +577,7 @@ class WalletAnalysisRunner:
         )
 
         mode_tag = "OBSERVER" if self.observer_mode else "ANALYSIS"
-        slots_str = f"{len(self.open_positions)} offen" if self.observer_mode else f"{len(self.open_positions)}/{self.max_positions}"
+        slots_str = f"{len(self.open_positions)}/{self.max_positions}"
         print()
         print("="*70)
         print(f" BUY [{mode_tag}]")
@@ -558,11 +600,9 @@ class WalletAnalysisRunner:
             self.price_update_task = asyncio.create_task(self._price_update_loop())
 
     async def _handle_sell(self, account: WalletAccount, token: str):
-        entry = self.open_positions.get(token)
+        key = (token, account.wallet)
+        entry = self.open_positions.get(key)
         if entry is None:
-            return
-        owning_account, _ = entry
-        if owning_account != account:
             return
 
         price_eur = await self.oracle.get_price_eur(token, skip_cache=True)
@@ -597,13 +637,14 @@ class WalletAnalysisRunner:
         if not record:
             return
 
-        self.open_positions.pop(token, None)
-        self.price_fail_counts.pop(token, None)
-        self.inactivity_tracker.pop(token, None)
-        self.observer_last_price_time.pop(token, None)
-        self.observer_entry_time.pop(token, None)
-        self.observer_stagnation_tracker.pop(token, None)
-        max_pct, min_pct = self.price_extremes.pop(token, (None, None))
+        key = (token, account.wallet)
+        self.open_positions.pop(key, None)
+        self.price_fail_counts.pop(key, None)
+        self.inactivity_tracker.pop(key, None)
+        self.observer_last_price_time.pop(key, None)
+        self.observer_entry_time.pop(key, None)
+        self.observer_stagnation_tracker.pop(key, None)
+        max_pct, min_pct = self.price_extremes.pop(key, (None, None))
         self.total_sells += 1
         self.oracle.set_rate_limit_from_positions(len(self.open_positions))
 
@@ -652,12 +693,13 @@ class WalletAnalysisRunner:
             entry_price_eur=record['entry_price_eur'],
             price_missing=price_missing,
             max_price_pct=max_pct,
-            min_price_pct=min_pct
+            min_price_pct=min_pct,
+            reason=reason,
         )
 
         if self.open_positions:
-            next_token, (next_account, next_price) = next(iter(self.open_positions.items()))
-            self.active_token   = next_token
+            next_key, (next_account, next_price) = next(iter(self.open_positions.items()))
+            self.active_token   = next_key[0]
             self.active_account = next_account
             self.last_price     = next_price
         else:
@@ -666,6 +708,102 @@ class WalletAnalysisRunner:
             self.last_price     = 0.0
             if self.price_update_task and not self.price_update_task.done():
                 self.price_update_task.cancel()
+
+    # 
+    # AUTO-EVALUATE: Session-Ende
+    # 
+
+    CANDIDATE_MIN_TRADES = 20  # Mindest-Trades fuer Vergleich
+
+    def _run_session_end_evaluate(self):
+        """
+        Wird am Session-Ende aufgerufen (nur Observer-Modus).
+        Prueft alle CandidateWallets auf >= CANDIDATE_MIN_TRADES saubere Trades.
+        Fuehrt evaluate_wallets aus wenn mindestens ein Candidate reif ist.
+        Danach: find_wallets --apply um Candidate-Slots wieder aufzufuellen.
+        """
+        import sqlite3
+        from pathlib import Path
+
+        if not self.observer_mode:
+            return
+
+        axiom_db = Path("data/axiom.db")
+        obs_db   = Path("data/observer_performance.db")
+        if not axiom_db.exists() or not obs_db.exists():
+            return
+
+        # Alle aktiven CandidateWallets laden
+        conn_ax = sqlite3.connect(str(axiom_db))
+        candidates = conn_ax.execute(
+            "SELECT wallet FROM axiom_wallets WHERE category = 'CandidateWallet' AND active = 1"
+        ).fetchall()
+        conn_ax.close()
+
+        if not candidates:
+            return
+
+        # Trade-Zaehlung pro Candidate
+        conn_obs = sqlite3.connect(str(obs_db))
+        ready = []
+        not_ready = []
+        for (wallet,) in candidates:
+            count = conn_obs.execute("""
+                SELECT COUNT(*) FROM wallet_trades
+                WHERE wallet = ? AND side = 'SELL'
+                  AND reason NOT IN ('SESSION_ENDED', 'CRASH_RECOVERY')
+                  AND price_missing = 0
+            """, (wallet,)).fetchone()[0]
+            if count >= self.CANDIDATE_MIN_TRADES:
+                ready.append((wallet, count))
+            else:
+                not_ready.append((wallet, count))
+        conn_obs.close()
+
+        print()
+        print("=" * 70)
+        print(" SESSION-ENDE: CANDIDATE AUSWERTUNG")
+        print("=" * 70)
+        print(f"  Candidates gesamt:   {len(candidates)}")
+        print(f"  Bereit (>={self.CANDIDATE_MIN_TRADES} Trades): {len(ready)}")
+        print(f"  Noch nicht bereit:   {len(not_ready)}")
+        for w, c in not_ready:
+            print(f"    {w[:20]}...  {c}/{self.CANDIDATE_MIN_TRADES} Trades")
+        print()
+
+        if not ready:
+            print("  Kein Candidate hat genug Trades. Kein Evaluate noetig.")
+            print("=" * 70)
+            print()
+            return
+
+        print(f"  {len(ready)} Candidate(s) bereit -> starte evaluate_wallets...")
+        print("=" * 70)
+        print()
+
+        try:
+            from runners import evaluate_wallets
+            evaluate_wallets.run()
+        except Exception as e:
+            logger.error(f"[AutoEvaluate] Fehler: {e}")
+            return
+
+        # Nach Evaluate: Candidate-Slots mit find_wallets auffuellen
+        print()
+        print("=" * 70)
+        print(" CANDIDATE-SLOTS AUFFUELLEN (find_wallets --apply)")
+        print("=" * 70)
+        print()
+        try:
+            import sys as _sys
+            _old_argv = _sys.argv
+            _sys.argv = ["find_wallets.py", "--apply"]
+            import find_wallets
+            find_wallets.main()
+            _sys.argv = _old_argv
+        except Exception as e:
+            logger.error(f"[AutoEvaluate] find_wallets Fehler: {e}")
+            print(f"  Tipp: Manuell ausfuehren: python find_wallets.py --apply")
 
     # 
     # PRICE MONITOR LOOP
@@ -702,7 +840,8 @@ class WalletAnalysisRunner:
                 if not self.open_positions:
                     break
 
-                for token, (account, _) in list(self.open_positions.items()):
+                for key, (account, _) in list(self.open_positions.items()):
+                    token = key[0]
                     pos = account.positions.get(token)
                     if pos is None:
                         continue
@@ -710,8 +849,8 @@ class WalletAnalysisRunner:
                     current_price = await self.oracle.get_price_eur(token, skip_cache=True)
 
                     if current_price is None:
-                        fails = self.price_fail_counts.get(token, 0) + 1
-                        self.price_fail_counts[token] = fails
+                        fails = self.price_fail_counts.get(key, 0) + 1
+                        self.price_fail_counts[key] = fails
 
                         # Anti-Softlock 1: zu viele aufeinanderfolgende Failures
                         if fails >= self.OBSERVER_MAX_PRICE_FAILURES:
@@ -729,7 +868,7 @@ class WalletAnalysisRunner:
                             continue
 
                         # Anti-Softlock 2: zu lange kein Preis ueberhaupt
-                        last_ok = self.observer_last_price_time.get(token, time.monotonic())
+                        last_ok = self.observer_last_price_time.get(key, time.monotonic())
                         no_price_mins = (time.monotonic() - last_ok) / 60
                         if no_price_mins >= self.OBSERVER_MAX_NO_PRICE_MINUTES:
                             logger.warning(
@@ -753,37 +892,37 @@ class WalletAnalysisRunner:
                         continue
 
                     # Preis erfolgreich -> Failure-Counter und Timer zuruecksetzen
-                    self.price_fail_counts[token] = 0
-                    self.observer_last_price_time[token] = time.monotonic()
+                    self.price_fail_counts[key] = 0
+                    self.observer_last_price_time[key] = time.monotonic()
 
                     entry_price = pos.entry_price_eur
                     pnl_eur     = (current_price - entry_price) * pos.amount
                     pnl_pct     = ((current_price - entry_price) / entry_price) * 100
-                    last_price  = self.open_positions[token][1]
+                    last_price  = self.open_positions[key][1]
                     change_pct  = ((current_price - last_price) / last_price * 100) if last_price > 0 else 0
 
-                    self.open_positions[token] = (account, current_price)
+                    self.open_positions[key] = (account, current_price)
 
                     # High/Low Tracking
                     if entry_price > 0:
                         current_pct = ((current_price - entry_price) / entry_price) * 100
-                        prev_max, prev_min = self.price_extremes.get(token, (current_pct, current_pct))
-                        self.price_extremes[token] = (
+                        prev_max, prev_min = self.price_extremes.get(key, (current_pct, current_pct))
+                        self.price_extremes[key] = (
                             max(prev_max, current_pct),
                             min(prev_min, current_pct)
                         )
 
                     # Stagnation-Tracking: Preisaenderung registrieren
                     stag_price, stag_time = self.observer_stagnation_tracker.get(
-                        token, (current_price, time.monotonic())
+                        key, (current_price, time.monotonic())
                     )
                     if current_price != stag_price:
-                        self.observer_stagnation_tracker[token] = (current_price, time.monotonic())
+                        self.observer_stagnation_tracker[key] = (current_price, time.monotonic())
                         stag_time = time.monotonic()
                     stagnation_mins = (time.monotonic() - stag_time) / 60
 
                     # Max-Haltedauer berechnen
-                    entry_t   = self.observer_entry_time.get(token, time.monotonic())
+                    entry_t   = self.observer_entry_time.get(key, time.monotonic())
                     hold_mins = (time.monotonic() - entry_t) / 60
 
                     # Status-Print mit Timeout-Hinweisen
@@ -792,7 +931,7 @@ class WalletAnalysisRunner:
                     if stagnation_mins > 5:
                         timeout_hint += f" | Stagnation: {stagnation_mins:.0f}/{self.OBSERVER_STAGNATION_MINUTES} Min"
                     if hold_mins > 10:
-                        timeout_hint += f" | Haltedauer: {hold_mins:.0f}/{self.OBSERVER_MAX_HOLD_MINUTES} Min"
+                        timeout_hint += f" | Haltedauer: {hold_mins:.0f}/{self.observer_max_hold_minutes} Min"
                     print(
                         f"{emoji} [Observer] {token[:8]}... @ {current_price:.8f} EUR "
                         f"| P&L: {pnl_eur:+.2f} EUR ({pnl_pct:+.2f}%) "
@@ -816,11 +955,11 @@ class WalletAnalysisRunner:
                         continue
 
                     # Max-Haltedauer-Timeout
-                    if hold_mins >= self.OBSERVER_MAX_HOLD_MINUTES:
+                    if hold_mins >= self.observer_max_hold_minutes:
                         logger.warning(
                             f"[Observer/MaxHold]  {token[:8]}... "
                             f"seit {hold_mins:.0f} Min offen "
-                            f"(limit {self.OBSERVER_MAX_HOLD_MINUTES} Min) -> schliessen"
+                            f"(limit {self.observer_max_hold_minutes} Min) -> schliessen"
                         )
                         await self._close_position(
                             token=token, account=account,
@@ -858,7 +997,8 @@ class WalletAnalysisRunner:
                 if not self.open_positions:
                     break
 
-                for token, (account, _) in list(self.open_positions.items()):
+                for key, (account, _) in list(self.open_positions.items()):
+                    token = key[0]
                     pos = account.positions.get(token)
                     if pos is None:
                         continue
@@ -866,8 +1006,8 @@ class WalletAnalysisRunner:
                     current_price = await self.oracle.get_price_eur(token, skip_cache=True)
 
                     if current_price is None:
-                        self.price_fail_counts[token] = self.price_fail_counts.get(token, 0) + 1
-                        fails = self.price_fail_counts[token]
+                        self.price_fail_counts[key] = self.price_fail_counts.get(key, 0) + 1
+                        fails = self.price_fail_counts[key]
                         logger.warning(
                             f"[PriceMonitor]   No price for {token[:8]}... "
                             f"({fails}/{MAX_PRICE_FAILURES} failures)"
@@ -886,31 +1026,31 @@ class WalletAnalysisRunner:
                             )
                         continue
 
-                    self.price_fail_counts[token] = 0
+                    self.price_fail_counts[key] = 0
 
                     entry_price = pos.entry_price_eur
                     pnl_eur     = (current_price - entry_price) * pos.amount
                     pnl_pct     = ((current_price - entry_price) / entry_price) * 100
-                    last_price  = self.open_positions[token][1]
+                    last_price  = self.open_positions[key][1]
                     change_pct  = ((current_price - last_price) / last_price * 100) if last_price > 0 else 0
 
-                    self.open_positions[token] = (account, current_price)
+                    self.open_positions[key] = (account, current_price)
 
                     # High/Low Tracking
                     if pos.entry_price_eur > 0:
                         current_pct = ((current_price - pos.entry_price_eur) / pos.entry_price_eur) * 100
-                        prev_max, prev_min = self.price_extremes.get(token, (current_pct, current_pct))
-                        self.price_extremes[token] = (
+                        prev_max, prev_min = self.price_extremes.get(key, (current_pct, current_pct))
+                        self.price_extremes[key] = (
                             max(prev_max, current_pct),
                             min(prev_min, current_pct)
                         )
 
                     # Inaktivitaets-Tracking
                     last_changed_price, last_changed_time = self.inactivity_tracker.get(
-                        token, (current_price, time.monotonic())
+                        key, (current_price, time.monotonic())
                     )
                     if current_price != last_changed_price:
-                        self.inactivity_tracker[token] = (current_price, time.monotonic())
+                        self.inactivity_tracker[key] = (current_price, time.monotonic())
                         last_changed_time = time.monotonic()
 
                     timeout = self.tracker.get_inactivity_timeout([account.wallet])
@@ -973,6 +1113,45 @@ class WalletAnalysisRunner:
     # SIGNAL HANDLER & SHUTDOWN
     # 
 
+    def _recover_orphaned_positions(self):
+        """
+        Erkennt BUY-Trades ohne passendes SELL aus vergangenen Sessions
+        (z.B. nach Reboot oder Stromausfall) und schliesst sie als CRASH_RECOVERY.
+        Diese Trades werden gespeichert aber aus allen Stats-Berechnungen
+        herausgefiltert (price_missing=True, reason=CRASH_RECOVERY).
+        """
+        orphans = self.tracker.get_orphaned_buys()
+        if not orphans:
+            return
+
+        print()
+        print("=" * 70)
+        print(f" CRASH RECOVERY: {len(orphans)} verwaiste Position(en) gefunden")
+        print(" (BUY ohne SELL aus einer abgebrochenen Session)")
+        print("=" * 70)
+        for o in orphans:
+            ts = o['timestamp'][:16] if o['timestamp'] else '?'
+            print(f"   {o['wallet'][:20]}...  {o['token'][:16]}...  "
+                  f"Session: {o['session_id']}  Zeit: {ts}")
+        print()
+        print(" Diese Positionen werden als CRASH_RECOVERY geschlossen (price_missing).")
+        print(" Sie fliessen NICHT in Statistiken ein.")
+        print("=" * 70)
+        print()
+
+        for o in orphans:
+            self.tracker.close_orphaned_buy(
+                buy_id=o['id'],
+                wallet=o['wallet'],
+                token=o['token'],
+                amount=o['amount'],
+                entry_price_eur=o['price_eur'],
+                session_id=o['session_id'],
+            )
+
+        print(f" {len(orphans)} verwaiste Position(en) bereinigt.")
+        print()
+
     def _signal_handler(self, signum, frame):
         if self.shutting_down:
             return
@@ -994,7 +1173,8 @@ class WalletAnalysisRunner:
 
         if self.open_positions:
             print(f"\n Closing {len(self.open_positions)} open position(s) at current market price...")
-            for token, (account, _) in list(self.open_positions.items()):
+            for key, (account, _) in list(self.open_positions.items()):
+                token = key[0]
                 price = await self.oracle.get_price_eur(token, skip_cache=True)
                 price_missing = price is None
                 if price_missing:
@@ -1111,6 +1291,10 @@ class WalletAnalysisRunner:
         db_path = "data/observer_performance.db" if self.observer_mode else "data/wallet_performance.db"
         print(f" Performance saved to: {db_path}")
         print("="*70)
+
+        # Auto-Evaluate am Session-Ende (nur Observer-Modus)
+        if self.observer_mode:
+            self._run_session_end_evaluate()
 
         if self.oracle:
             await self.oracle.close()

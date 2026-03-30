@@ -46,8 +46,9 @@ def load_wallets_from_json(json_path: str) -> None:
 
         # Wallets einfügen
         for entry in wallets:
-            wallet = entry.get("wallet")
+            wallet   = entry.get("wallet")
             category = entry.get("category")
+            label    = entry.get("label", "")  # optional: 'smart', 'custom', etc.
 
             # Minimal-Validierung
             if not wallet:
@@ -55,10 +56,10 @@ def load_wallets_from_json(json_path: str) -> None:
 
             cursor.execute(
                 """
-                INSERT INTO axiom_wallets (wallet, category, active)
-                VALUES (?, ?, 1)
+                INSERT INTO axiom_wallets (wallet, category, source, active)
+                VALUES (?, ?, ?, 1)
                 """,
-                (wallet, category)
+                (wallet, category, label)
             )
 
         # Änderungen dauerhaft speichern

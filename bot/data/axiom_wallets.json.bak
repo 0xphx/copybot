@@ -26,7 +26,7 @@
     },
     {
         "wallet": "5B79fMkcFeRTiwm7ehsZsFiKsC7m7n1Bgv9yLxPp9q2X",
-        "category": "ArchivedWallet",
+        "category": "ActiveWallet",
         "label": "custom"
     },
     {
@@ -246,7 +246,7 @@
     },
     {
         "wallet": "BTf4A2exGK9BCVDNzy65b9dUzXgMqB4weVkvTMFQsadd",
-        "category": "ActiveWallet",
+        "category": "CandidateWallet",
         "label": "smart"
     },
     {

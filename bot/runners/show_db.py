@@ -19,35 +19,50 @@ def connect():
 
 
 def show_wallet_stats(filter_min_trades: int = 0, sort_by: str = "confidence"):
-    """Zeigt alle Wallet Stats"""
+    """Zeigt alle Wallet Stats - inkl. Wallets aus axiom.db ohne Trades"""
     conn = connect()
     cursor = conn.cursor()
 
+    # axiom.db einhaengen um alle bekannten Wallets zu sehen
+    cursor.execute("ATTACH DATABASE 'data/axiom.db' AS axiom")
+
     order_map = {
-        "confidence": "confidence_score DESC",
-        "pnl":        "total_pnl_eur DESC",
-        "winrate":    "win_rate DESC",
-        "trades":     "total_trades DESC",
+        "confidence": "COALESCE(ws.confidence_score, 0.0) DESC",
+        "pnl":        "COALESCE(ws.total_pnl_eur, 0.0) DESC",
+        "winrate":    "COALESCE(ws.win_rate, 0.0) DESC",
+        "trades":     "COALESCE(ws.total_trades, 0) DESC",
     }
-    order = order_map.get(sort_by, "confidence_score DESC")
+    order = order_map.get(sort_by, "COALESCE(ws.confidence_score, 0.0) DESC")
 
     cursor.execute(f"""
         SELECT
-            ws.*,
+            ax.wallet,
+            ax.category,
+            COALESCE(ax.source, '') as label,
+            COALESCE(ws.total_trades, 0)      as total_trades,
+            COALESCE(ws.win_rate, 0.0)        as win_rate,
+            COALESCE(ws.total_pnl_eur, 0.0)   as total_pnl_eur,
+            COALESCE(ws.confidence_score, 0.0) as confidence_score,
+            COALESCE(ws.strategy_label, 'UNKNOWN') as strategy_label,
+            ws.last_updated,
             ROUND(AVG(CASE WHEN wt.price_missing = 0 AND wt.pnl_eur > 0  THEN wt.pnl_percent END), 1) as avg_win_pct,
             ROUND(AVG(CASE WHEN wt.price_missing = 0 AND wt.pnl_eur <= 0 THEN wt.pnl_percent END), 1) as avg_loss_pct,
             MAX(CASE WHEN wt.price_missing = 0 AND wt.pnl_eur > 0        THEN wt.pnl_percent END) as max_win_pct,
             COUNT(CASE WHEN wt.price_missing = 0 AND wt.pnl_eur > 0      THEN 1 END)             as win_count
-        FROM wallet_stats ws
+        FROM axiom.axiom_wallets ax
+        LEFT JOIN wallet_stats ws ON ws.wallet = ax.wallet
         LEFT JOIN wallet_trades wt
-            ON wt.wallet = ws.wallet
+            ON wt.wallet = ax.wallet
             AND wt.side = 'SELL'
             AND wt.pnl_percent IS NOT NULL
-        WHERE ws.total_trades >= ?
-        GROUP BY ws.wallet
+        WHERE ax.active = 1
+          AND ax.category != 'OwnWallet'
+          AND COALESCE(ws.total_trades, 0) >= ?
+        GROUP BY ax.wallet
         ORDER BY {order}
     """, (filter_min_trades,))
     rows = cursor.fetchall()
+    cursor.execute("DETACH DATABASE axiom")
     conn.close()
 
     if not rows:
@@ -76,14 +91,17 @@ def show_wallet_stats(filter_min_trades: int = 0, sort_by: str = "confidence"):
         else:
             ev_str = "n/a"
         label   = r['strategy_label'] if 'strategy_label' in r.keys() else 'UNKNOWN'
+        cat     = r['category'] if 'category' in r.keys() else ''
+        src     = r['label']    if 'label'    in r.keys() else ''
+        cat_tag = '[C]' if cat == 'CandidateWallet' else '[A]'
         marker  = "+" if conf >= 0.7 else "~" if conf >= 0.5 else "-"
-        updated = r['last_updated'][:16].replace('T', ' ')
+        updated = r['last_updated'][:16].replace('T', ' ') if r['last_updated'] else '---'
         rendered.append({
             'wallet': r['wallet'], 'trades': r['total_trades'],
             'wr': f"{wr*100:.0f}%", 'conf': conf,
             'avgw_str': avgw_str, 'avgl_str': avgl_str, 'ev_str': ev_str,
             'label': label, 'marker': marker, 'updated': updated,
-            'outlier': outlier,
+            'outlier': outlier, 'cat_tag': cat_tag, 'src': src,
         })
 
     # --- Dynamische Spaltenbreiten: max(Header, laengster Wert) + 1 Puffer ---
@@ -104,21 +122,20 @@ def show_wallet_stats(filter_min_trades: int = 0, sort_by: str = "confidence"):
     wallet_col_w = C_WALLET  # gesamt fuer "x name"
 
     header = (
-        f"  {'#':>{C_IDX}}  {'Wallet':<{wallet_col_w}}"
+        f"  {'#':>{C_IDX}}  {'':3} {'Wallet':<{wallet_col_w}}"
         f"  {'T':>{C_TRADES}}  {'WR%':>{C_WIN}}"
         f"  {'avgWin':>{C_AVGW}}  {'avgLoss':>{C_AVGL}}"
         f"  {'EV':>{C_EV}}"
         f"  {'Conf':>{C_CONF}}  {'Label':<{C_LABEL}}  Updated"
     )
-    total_w = C_IDX + wallet_col_w + C_TRADES + C_WIN + C_AVGW + C_AVGL + C_EV + C_CONF + C_LABEL + C_DATE + 20
+    total_w = C_IDX + wallet_col_w + C_TRADES + C_WIN + C_AVGW + C_AVGL + C_EV + C_CONF + C_LABEL + C_DATE + 24
     print(header)
     print("  " + "-" * total_w)
 
     for i, r in enumerate(rendered, 1):
-        # marker + Leerzeichen + wallet zusammen in wallet_col_w
         wallet_cell = f"{r['marker']} {r['wallet']}"
         print(
-            f"  {i:>{C_IDX}}  {wallet_cell:<{wallet_col_w}}"
+            f"  {i:>{C_IDX}}  {r['cat_tag']} {wallet_cell:<{wallet_col_w}}"
             f"  {r['trades']:>{C_TRADES}}x  {r['wr']:>{C_WIN}}"
             f"  {r['avgw_str']:>{C_AVGW}}  {r['avgl_str']:>{C_AVGL}}"
             f"  {r['ev_str']:>{C_EV}}"

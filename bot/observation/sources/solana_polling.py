@@ -107,14 +107,38 @@ class SolanaPollingSource(TradeSource):
 
 
     async def poll_all_wallets(self):
-        """Fragt alle Wallets gleichzeitig ab"""
+        """Fragt alle Wallets in Batches ab (verhindert Rate-Limiting)"""
         if self.is_fast_polling and self.watch_wallets:
-            tasks = [self.poll_wallet(wallet) for wallet in self.watch_wallets]
+            wallets = list(self.watch_wallets)
+            batch_delay = 0.1
         else:
-            tasks = [self.poll_wallet(wallet) for wallet in self.wallets]
-        
-        await asyncio.gather(*tasks, return_exceptions=True)
-        
+            wallets = list(self.wallets)
+            batch_delay = 0.3
+
+        # Batch-Groesse dynamisch: ~4 Batches pro Durchlauf, min 3 max 15
+        batch_size = max(3, min(15, len(wallets) // 4 or 3))
+        num_batches = (len(wallets) + batch_size - 1) // batch_size
+
+        # Delay so berechnen dass wir unter RPC_MAX_RPS bleiben:
+        # RPC_MAX_RPS Requests/s -> pro Batch max batch_size Requests
+        # -> Pause = batch_size / RPC_MAX_RPS
+        RPC_MAX_RPS = 8  # konservativer Wert fuer kostenlose RPCs
+        min_delay   = batch_size / RPC_MAX_RPS
+        batch_delay = max(batch_delay, min_delay)
+
+        logger.debug(
+            f"[Polling] {len(wallets)} wallets -> "
+            f"{num_batches} Batches x {batch_size} @ {batch_delay:.2f}s delay"
+            f" (~{batch_size/batch_delay:.1f} req/s)"
+        )
+
+        for i in range(0, len(wallets), batch_size):
+            batch = wallets[i:i + batch_size]
+            tasks = [self.poll_wallet(wallet) for wallet in batch]
+            await asyncio.gather(*tasks, return_exceptions=True)
+            if i + batch_size < len(wallets):
+                await asyncio.sleep(batch_delay)
+
         if not self.initial_load_done:
             self.initial_load_done = True
             if self.ignore_initial_txs:

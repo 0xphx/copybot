@@ -35,6 +35,11 @@ Thumbs.db
 # ----------------------------
 data/*.db
 data/*.json
+data/*.bak
+
+# DB Sync Klon (separates Repo)
+.db_sync/
+.db_sync_remote
 
 # Falls du später CSVs importierst
 data/*.csv

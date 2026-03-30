@@ -145,6 +145,7 @@ class WalletTracker:
                 price_missing   INTEGER DEFAULT 0,
                 max_price_pct   REAL,
                 min_price_pct   REAL,
+                reason          TEXT,
                 timestamp       TEXT NOT NULL
             )
         """)
@@ -156,6 +157,7 @@ class WalletTracker:
             ('price_missing', 'INTEGER DEFAULT 0'),
             ('max_price_pct', 'REAL'),
             ('min_price_pct', 'REAL'),
+            ('reason',        'TEXT'),
         ]:
             if col not in trade_cols:
                 cursor.execute(f"ALTER TABLE wallet_trades ADD COLUMN {col} {typedef}")
@@ -244,13 +246,16 @@ class WalletTracker:
                     entry_price_eur: float,
                     price_missing: bool = False,
                     max_price_pct: Optional[float] = None,
-                    min_price_pct: Optional[float] = None) -> None:
+                    min_price_pct: Optional[float] = None,
+                    reason: Optional[str] = None) -> None:
         """
         Speichert einen SELL Trade und aktualisiert Wallet-Stats.
 
         max_price_pct: hoechster Preis waehrend der Position in % (z.B. +120.0)
         min_price_pct: niedrigster Preis waehrend der Position in % (z.B. -38.0)
         price_missing=True markiert Trades bei denen kein Preis abrufbar war
+        reason: Abschlussgrund (z.B. WALLET_SOLD, SESSION_ENDED, STOP_LOSS, ...)
+                SESSION_ENDED wird aus Stats-Berechnungen herausgefiltert.
         """
         pnl_eur = (price_eur - entry_price_eur) * amount
         pnl_percent = ((price_eur - entry_price_eur) / entry_price_eur * 100) if entry_price_eur > 0 else 0
@@ -261,14 +266,14 @@ class WalletTracker:
         cursor.execute("""
             INSERT INTO wallet_trades
             (session_id, wallet, token, side, amount, price_eur, value_eur,
-             pnl_eur, pnl_percent, price_missing, max_price_pct, min_price_pct, timestamp)
-            VALUES (?, ?, ?, 'SELL', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             pnl_eur, pnl_percent, price_missing, max_price_pct, min_price_pct, reason, timestamp)
+            VALUES (?, ?, ?, 'SELL', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             session_id, wallet, token,
             amount, price_eur, amount * price_eur,
             pnl_eur, pnl_percent,
             1 if price_missing else 0,
-            max_price_pct, min_price_pct,
+            max_price_pct, min_price_pct, reason,
             datetime.now().isoformat()
         ))
 
@@ -290,10 +295,21 @@ class WalletTracker:
             SELECT pnl_eur, pnl_percent, max_price_pct, min_price_pct
             FROM wallet_trades
             WHERE wallet = ? AND side = 'SELL' AND pnl_eur IS NOT NULL
+              AND (reason IS NULL OR reason NOT IN ('SESSION_ENDED', 'CRASH_RECOVERY'))
         """, (wallet,))
         rows = cursor.fetchall()
 
         if not rows:
+            # Kein sauberer Trade -> Basis-Eintrag schreiben damit Wallet in Stats sichtbar ist
+            cursor.execute("""
+                INSERT INTO wallet_stats
+                    (wallet, total_trades, winning_trades, losing_trades,
+                     total_pnl_eur, avg_pnl_eur, win_rate, confidence_score,
+                     strategy_label, dynamic_sl, dynamic_tp, last_updated)
+                VALUES (?, 0, 0, 0, 0.0, 0.0, 0.0, 0.2, 'UNKNOWN', NULL, NULL, ?)
+                ON CONFLICT(wallet) DO NOTHING
+            """, (wallet, datetime.now().isoformat()))
+            conn.commit()
             conn.close()
             return
 
@@ -387,6 +403,7 @@ class WalletTracker:
               AND pnl_eur IS NOT NULL
               AND price_missing = 0
               AND pnl_percent != 0
+              AND (reason IS NULL OR reason NOT IN ('SESSION_ENDED', 'CRASH_RECOVERY'))
             ORDER BY timestamp DESC
         """, (wallet,))
         trades = cursor.fetchall()
@@ -467,6 +484,7 @@ class WalletTracker:
               AND pnl_eur IS NOT NULL
               AND price_missing = 0
               AND pnl_percent != 0
+              AND (reason IS NULL OR reason NOT IN ('SESSION_ENDED', 'CRASH_RECOVERY'))
             ORDER BY timestamp DESC
         """, (wallet,))
         trades = cursor.fetchall()
@@ -570,6 +588,7 @@ class WalletTracker:
                   AND pnl_eur IS NOT NULL
                   AND price_missing = 0
                   AND pnl_percent != 0
+                  AND (reason IS NULL OR reason NOT IN ('SESSION_ENDED', 'CRASH_RECOVERY'))
                 ORDER BY timestamp DESC
             """, (wallet,))
             trades = obs_cursor.fetchall()
@@ -643,6 +662,56 @@ class WalletTracker:
         row = cursor.fetchone()
         conn.close()
         return row is not None and row['dynamic_sl'] is not None and row['dynamic_tp'] is not None
+
+    def get_orphaned_buys(self) -> list:
+        """
+        Findet BUY-Trades ohne passendes SELL in derselben Session.
+        Das passiert wenn der Bot abrupt beendet wird (Reboot, Stromausfall).
+
+        Gibt Liste von Dicts zurueck:
+            session_id, wallet, token, amount, price_eur, timestamp
+        """
+        conn = self._connect()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT b.id, b.session_id, b.wallet, b.token, b.amount, b.price_eur, b.timestamp
+            FROM wallet_trades b
+            WHERE b.side = 'BUY'
+              AND NOT EXISTS (
+                  SELECT 1 FROM wallet_trades s
+                  WHERE s.side = 'SELL'
+                    AND s.wallet  = b.wallet
+                    AND s.token   = b.token
+                    AND s.session_id = b.session_id
+              )
+            ORDER BY b.timestamp DESC
+        """)
+        rows = cursor.fetchall()
+        conn.close()
+        return [dict(r) for r in rows]
+
+    def close_orphaned_buy(self, buy_id: int, wallet: str, token: str,
+                           amount: float, entry_price_eur: float,
+                           session_id: str) -> None:
+        """
+        Schliesst eine verwaiste Position mit reason=CRASH_RECOVERY und price_missing=True.
+        Preis ist unbekannt (Reboot) -> Totalverlust wird angenommen,
+        aber der Trade wird aus Stats herausgefiltert (price_missing=1).
+        """
+        self.record_sell(
+            session_id=session_id,
+            wallet=wallet,
+            token=token,
+            amount=amount,
+            price_eur=0.0,
+            entry_price_eur=entry_price_eur,
+            price_missing=True,
+            reason='CRASH_RECOVERY',
+        )
+        logger.info(
+            f"[WalletTracker] CRASH_RECOVERY: {wallet[:8]}... {token[:8]}... "
+            f"buy_id={buy_id} -> closed as price_missing"
+        )
 
     def get_strategy_label(self, wallet: str) -> str:
         conn = self._connect()

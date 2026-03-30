@@ -49,6 +49,29 @@ COMMANDS = [
                 ],
             },
             {
+                "cmd": "show_wallets",
+                "args": "",
+                "desc": "Alle Wallets im Bot anzeigen (axiom.db)",
+                "details": [
+                    "Zeigt OwnWallet, ActiveWallets, CandidateWallets, ArchivedWallets",
+                    "ActiveWallets mit Label [smart] oder [custom]",
+                    "Inkl. Gesamtanzahl pro Kategorie",
+                ],
+            },
+            {
+                "cmd": "evaluate_wallets",
+                "args": "",
+                "desc": "CandidateWallets mit ActiveWallets vergleichen und ggf. tauschen",
+                "details": [
+                    "Berechnet EV (Expected Value) aus observer_performance.db",
+                    "EV = WinRate * AvgWin - (1 - WinRate) * AvgLoss",
+                    f"Mindest-Trades: 20 pro Wallet",
+                    "Candidates mit hoeherem EV ersetzen schlechteste Actives",
+                    "Ersetzte Actives -> ArchivedWallet (bleiben in DB)",
+                    "Aenderung nur in axiom_wallets.json, danach import_wallets.py noetig",
+                ],
+            },
+            {
                 "cmd": "show_db",
                 "args": "[--observer] [sort] [--min N] [sessions] [wallet PREFIX]",
                 "desc": "Wallet Datenbank im Terminal anzeigen",

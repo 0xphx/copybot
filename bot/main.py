@@ -9,8 +9,7 @@ def main():
     mode = sys.argv[1]
 
     if mode == "import":
-        from runners import import_axiom
-        import_axiom.run()
+        import import_wallets  # liest axiom_wallets.json -> schreibt in axiom.db
 
     elif mode == "test":
         from runners import test_wallet_sync
@@ -46,6 +45,14 @@ def main():
         from runners import wallet_analysis
         import asyncio
         asyncio.run(wallet_analysis.main())
+
+    elif mode == "show_wallets":
+        from runners import show_wallets
+        show_wallets.run()
+
+    elif mode == "evaluate_wallets":
+        from runners import evaluate_wallets
+        evaluate_wallets.run()
 
     elif mode == "show_db":
         from runners import show_db
