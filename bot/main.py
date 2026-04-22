@@ -62,6 +62,10 @@ def main():
         from runners import show_db
         show_db.run(sys.argv[2:])
 
+    elif mode == "logs":
+        from runners import logs
+        logs.run(sys.argv[2:])
+
     elif mode == "scann_all":
         from runners import scann_all
         scann_all.run()

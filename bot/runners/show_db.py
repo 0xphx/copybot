@@ -199,6 +199,107 @@ def show_sessions():
     print(f"  Gesamt: {len(rows)} Sessions")
 
 
+def show_session_detail(session_prefix: str):
+    """Zeigt alle Trades einer bestimmten Session"""
+    conn = connect()
+    cursor = conn.cursor()
+
+    # Session per Prefix suchen
+    cursor.execute(
+        "SELECT DISTINCT session_id FROM wallet_trades WHERE session_id LIKE ? ORDER BY session_id DESC",
+        (session_prefix + "%",)
+    )
+    matches = [r['session_id'] for r in cursor.fetchall()]
+
+    if not matches:
+        print(f"   Keine Session gefunden fuer Prefix: '{session_prefix}'")
+        print(f"   Tipp: python main.py show_db sessions  ->  alle Sessions anzeigen")
+        conn.close()
+        return
+
+    if len(matches) > 1:
+        print(f"    Mehrere Sessions gefunden - bitte laengeren Prefix angeben:")
+        for m in matches:
+            print(f"    {m}")
+        conn.close()
+        return
+
+    session_id = matches[0]
+
+    # Session-Statistiken
+    cursor.execute("""
+        SELECT
+            COUNT(CASE WHEN side = 'BUY'  THEN 1 END) as buys,
+            COUNT(CASE WHEN side = 'SELL' THEN 1 END) as sells,
+            COUNT(DISTINCT wallet) as wallets,
+            ROUND(SUM(CASE WHEN side='SELL' AND pnl_eur IS NOT NULL AND price_missing=0 THEN pnl_eur ELSE 0 END), 2) as total_pnl,
+            COUNT(CASE WHEN side='SELL' AND pnl_eur > 0 AND price_missing=0 THEN 1 END) as wins,
+            COUNT(CASE WHEN side='SELL' AND pnl_eur <= 0 AND price_missing=0 THEN 1 END) as losses,
+            MIN(timestamp) as started,
+            MAX(timestamp) as ended
+        FROM wallet_trades WHERE session_id = ?
+    """, (session_id,))
+    stats = cursor.fetchone()
+
+    # Alle SELL-Trades der Session
+    cursor.execute("""
+        SELECT wallet, token, entry_price_eur, price_eur as exit_price, pnl_eur, pnl_percent,
+               price_missing, reason, timestamp
+        FROM wallet_trades
+        WHERE session_id = ? AND side = 'SELL'
+        ORDER BY timestamp ASC
+    """, (session_id,))
+    trades = cursor.fetchall()
+    conn.close()
+
+    # Header
+    print(f"  Session:   {session_id}")
+    print(f"  Gestartet: {stats['started'][:16] if stats['started'] else '?'}")
+    print(f"  Beendet:   {stats['ended'][:16]   if stats['ended']   else '?'}")
+    print(f"  Wallets:   {stats['wallets']}")
+    print(f"  BUYs:      {stats['buys']}    SELLs: {stats['sells']}")
+    sells = stats['sells'] or 0
+    wins  = stats['wins']  or 0
+    wr    = (wins / sells * 100) if sells > 0 else 0
+    print(f"  Win Rate:  {wr:.1f}%  ({wins}W / {stats['losses']}L)")
+    pnl_total = stats['total_pnl'] or 0
+    pnl_emoji = "+" if pnl_total >= 0 else "-"
+    print(f"  Total P&L: {pnl_total:+.2f} EUR")
+    print()
+
+    if not trades:
+        print("  Keine SELL-Trades in dieser Session.")
+        return
+
+    # Trades-Tabelle
+    print(f"  {'#':>3}  {'Wallet':<12} {'Token':<12} {'Entry EUR':>14} {'Exit EUR':>14} {'P&L EUR':>10} {'P&L%':>8}  {'Grund':<22}  {'Datum'}")
+    print("  " + "-" * 105)
+
+    running_pnl = 0.0
+    for i, t in enumerate(trades, 1):
+        pnl       = t['pnl_eur'] or 0
+        pct       = t['pnl_percent'] or 0
+        missing   = " [!]" if t['price_missing'] else ""
+        result    = "OK" if pnl >= 0 else "--"
+        entry     = t['entry_price_eur'] or t['exit_price']
+        reason    = (t['reason'] or '')[:20]
+        ts        = (t['timestamp'] or '')[:16]
+        wallet_s  = t['wallet'][:10]
+        token_s   = t['token'][:10]
+        running_pnl += pnl
+        print(
+            f"  {i:>3}  {wallet_s:<12} {token_s:<12}"
+            f" {entry:>14.8f} {t['exit_price']:>14.8f}"
+            f" {pnl:>+9.2f}  {pct:>+7.1f}%"
+            f"  {result}{missing}  {reason:<20}  {ts}"
+        )
+
+    print("  " + "-" * 105)
+    print(f"  {'':>3}  {'':12} {'TOTAL':12} {'':>14} {'':>14} {running_pnl:>+9.2f}  {'':>7}")
+    print()
+    print(f"  Legende: [!] = kein Preis verfuegbar (Totalverlust angenommen)")
+
+
 def show_wallet_detail(wallet_prefix: str):
     """Zeigt alle Trades eines Wallets"""
     conn = connect()
@@ -327,6 +428,7 @@ def print_help():
     print("  python main.py show_db trades               Sortiert nach Trade-Anzahl")
     print("  python main.py show_db --min 5              Nur Wallets mit min. 5 Trades")
     print("  python main.py show_db sessions             Alle Sessions anzeigen")
+    print("  python main.py show_db session <ID>         Alle Trades einer Session")
     print("  python main.py show_db wallet <PREFIX>      Detail-Ansicht eines Wallets")
     print()
 
@@ -370,6 +472,10 @@ def run(args: list):
                 pass
         elif arg == "sessions":
             mode = "sessions"
+        elif arg == "session" and i + 1 < len(args):
+            mode = "session_detail"
+            wallet_prefix = args[i + 1]
+            i += 1
         elif arg == "wallet" and i + 1 < len(args):
             mode = "wallet"
             wallet_prefix = args[i + 1]
@@ -386,6 +492,12 @@ def run(args: list):
         print(f" SESSION UEBERSICHT  [{db_label}]  ({_active_db_path})")
         print("="*70)
         show_sessions()
+
+    elif mode == "session_detail":
+        print("="*70)
+        print(f" SESSION DETAIL  [{db_label}]")
+        print("="*70)
+        show_session_detail(wallet_prefix)
 
     elif mode == "wallet":
         print("="*70)
