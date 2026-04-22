@@ -31,7 +31,7 @@
     },
     {
         "wallet": "3LUfv2u5yzsDtUzPdsSJ7ygPBuqwfycMkjpNreRR2Yww",
-        "category": "ActiveWallet",
+        "category": "ArchivedWallet",
         "label": "custom"
     },
     {
@@ -261,11 +261,51 @@
     },
     {
         "wallet": "H8XPEqv6CuNqpyDx3Dyc3CWq1AUvsQwbPmXBpFXdFb6",
-        "category": "CandidateWallet",
+        "category": "ActiveWallet",
         "label": "smart"
     },
     {
         "wallet": "THXcGyTMLSKWmvpDpdgL8G224xfMXksCfA29LBoJfUJ",
+        "category": "CandidateWallet",
+        "label": "smart"
+    },
+    {
+        "wallet": "FxwArENkKBx4QyfoEU1vkBnDzMfZV9Z1b8GBzpT9zb5k",
+        "category": "CandidateWallet",
+        "label": "smart"
+    },
+    {
+        "wallet": "4HXb7ivgvjbHC3TBesmmD9LovH8tmTv9DZsq12GMvEpU",
+        "category": "CandidateWallet",
+        "label": "smart"
+    },
+    {
+        "wallet": "J79w9MbwEam2ekuvunCNGA4Sfq4dA4uALVZwffUPkCuK",
+        "category": "CandidateWallet",
+        "label": "smart"
+    },
+    {
+        "wallet": "GTLLN1nkjBFFXmu4EGs3ACFKfJXHzGXveSdUngDiAn7V",
+        "category": "CandidateWallet",
+        "label": "smart"
+    },
+    {
+        "wallet": "ASVzakePP6GNg9r95d4LPZHJDMXun6L6E4um4pu5ybJk",
+        "category": "CandidateWallet",
+        "label": "smart"
+    },
+    {
+        "wallet": "9gxgKRGJGEtYeHKRSp3yjFRNvn8SdfTifMSPQ257SVLn",
+        "category": "CandidateWallet",
+        "label": "smart"
+    },
+    {
+        "wallet": "33S3cM4bQuwvFCP3QEA16JoQYhdWmddCJgpmzZYEJtcN",
+        "category": "CandidateWallet",
+        "label": "smart"
+    },
+    {
+        "wallet": "LuitxRGMJErT1N5JDArXVuxtsomBUsLZHf9Yf1TVBBn",
         "category": "CandidateWallet",
         "label": "smart"
     }

@@ -54,6 +54,10 @@ def main():
         from runners import evaluate_wallets
         evaluate_wallets.run()
 
+    elif mode == "tune_observer":
+        from runners import tune_observer
+        tune_observer.run(sys.argv[2:])
+
     elif mode == "show_db":
         from runners import show_db
         show_db.run(sys.argv[2:])

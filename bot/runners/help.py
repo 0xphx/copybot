@@ -31,6 +31,36 @@ COMMANDS = [
         ],
     },
     {
+        "category": " OPTIMIERUNG",
+        "commands": [
+            {
+                "cmd": "tune_observer",
+                "args": "[--sessions N] [--top N]",
+                "desc": "Hyperparameter-Simulation auf Observer-Daten",
+                "details": [
+                    "Testet alle Kombinationen von Stagnation + MaxHold",
+                    "Stagnation: 5/10/15/20/30 Min",
+                    "MaxHold:    20/40/60/90/120 Min",
+                    "Berechnet EV, WR, PnL fuer jede Kombination",
+                    "Gibt Heatmap + Ranking der besten Konfiguration aus",
+                    "--sessions 3   nur letzte 3 Sessions verwenden",
+                    "--top 5        nur Top 5 Kombinationen anzeigen",
+                ],
+            },
+            {
+                "cmd": "evaluate_wallets",
+                "args": "",
+                "desc": "CandidateWallets mit ActiveWallets vergleichen (EV-basiert)",
+                "details": [
+                    "Berechnet EV aus observer_performance.db",
+                    "Mindest-Trades: 20 pro Wallet",
+                    "Candidates mit hoeherem EV ersetzen schlechteste Actives",
+                    "Ersetzte Actives -> ArchivedWallet",
+                ],
+            },
+        ],
+    },
+    {
         "category": " WALLET ANALYSE",
         "commands": [
             {

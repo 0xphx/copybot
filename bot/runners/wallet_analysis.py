@@ -38,9 +38,12 @@ from datetime import datetime
 from typing import Dict, Optional
 from dataclasses import dataclass, field
 
-from config.network import RPC_HTTP_ENDPOINTS, NETWORK_MAINNET
+from config.network import (
+    RPC_HTTP_ENDPOINTS, WS_ENDPOINTS, WS_HTTP_ENDPOINTS, NETWORK_MAINNET
+)
 from wallets.sync import sync_wallets
 from observation.sources.solana_polling import SolanaPollingSource
+from observation.sources.solana_ws_source import SolanaWebSocketSource
 from observation.models import TradeEvent
 from trading.price_oracle import PriceOracle
 from trading.wallet_tracker import WalletTracker
@@ -91,12 +94,16 @@ class WalletAccount:
     def num_trades(self) -> int:
         return len([t for t in self.closed_trades if t['side'] == 'SELL'])
 
-    def open_position(self, token: str, price_eur: float) -> Optional[WalletPosition]:
+    def open_position(self, token: str, price_eur: float, observer_mode: bool = False) -> Optional[WalletPosition]:
         if token in self.positions or price_eur <= 0:
             return None
-        invest = self.cash * POSITION_SIZE_PERCENT
-        if invest < 0.01:
-            return None
+        if observer_mode:
+            # Observer: Kapital ist virtuell und unbegrenzt (immer fixed 200 EUR pro Trade)
+            invest = CAPITAL_PER_WALLET_EUR * POSITION_SIZE_PERCENT
+        else:
+            invest = self.cash * POSITION_SIZE_PERCENT
+            if invest < 0.01:
+                return None
         amount = invest / price_eur
         pos = WalletPosition(
             wallet=self.wallet, token=token,
@@ -154,7 +161,8 @@ class WalletAnalysisRunner:
     def __init__(self):
         self.shutting_down  = False
         self.observer_mode: bool = False  # False = Analysis, True = Observer
-        self.source:             Optional[SolanaPollingSource]    = None
+        self.use_websocket: bool = False  # False = Polling (Helius), True = WebSocket (Public)
+        self.source: Optional[SolanaPollingSource] = None
         self.oracle:             Optional[PriceOracle]            = None
         self.tracker:            Optional[WalletTracker]          = None
         self.connection_monitor: Optional[ConnectionHealthMonitor] = None
@@ -226,7 +234,7 @@ class WalletAnalysisRunner:
                 print(f"   {w[:20]}...  conf={s:.2f}  [{label}]")
         print()
 
-        # Config (inkl. Moduswahl) -> setzt self.observer_mode und self.session_id
+        # Config (inkl. Moduswahl + Source-Wahl) -> setzt self.observer_mode, self.use_websocket
         self._get_config_from_user()
 
         # Tracker mit der modusspezifischen DB initialisieren
@@ -254,14 +262,24 @@ class WalletAnalysisRunner:
             check_interval=5.0
         )
 
-        self.source = SolanaPollingSource(
-            rpc_http_url=RPC_HTTP_ENDPOINTS[NETWORK_MAINNET],
-            wallets=wallet_addresses,
-            callback=self._handle_trade,
-            poll_interval=5,
-            fast_poll_interval=0.5,
-            connection_monitor=self.connection_monitor
-        )
+        if self.use_websocket:
+            self.source = SolanaWebSocketSource(
+                ws_url=WS_ENDPOINTS[NETWORK_MAINNET],
+                http_url=WS_HTTP_ENDPOINTS[NETWORK_MAINNET],
+                wallets=wallet_addresses,
+                callback=self._handle_trade,
+                connection_monitor=self.connection_monitor,
+                reconnect_delay=self.config.get('reconnect_delay', 5.0),
+            )
+        else:
+            self.source = SolanaPollingSource(
+                rpc_http_url=RPC_HTTP_ENDPOINTS[NETWORK_MAINNET],
+                wallets=wallet_addresses,
+                callback=self._handle_trade,
+                poll_interval=5,
+                fast_poll_interval=0.5,
+                connection_monitor=self.connection_monitor,
+            )
 
         signal.signal(signal.SIGINT, self._signal_handler)
         self.start_time = datetime.now()
@@ -301,6 +319,23 @@ class WalletAnalysisRunner:
                 break
             else:
                 print("    Bitte 1 oder 2 eingeben!")
+
+        print()
+        print(" Trade-Source waehlen:")
+        print("   [P] Polling    - Helius HTTP RPC     (bisheriges System, ~277k Credits/Tag)")
+        print("   [W] Free RPC   - 10 Public Endpunkte (neues System, 0 Credits, rotierend)")
+        print()
+
+        while True:
+            inp = input(" Source [P]: ").strip().upper()
+            if not inp or inp == "P":
+                self.use_websocket = False
+                break
+            elif inp == "W":
+                self.use_websocket = True
+                break
+            else:
+                print("    Bitte P oder W eingeben!")
 
         print()
         print("Druecke ENTER fuer Standardwerte")
@@ -370,6 +405,22 @@ class WalletAnalysisRunner:
             except ValueError:
                 print("    Bitte eine ganze Zahl eingeben!")
 
+        if self.use_websocket:
+            while True:
+                inp = input("  WS Reconnect-Delay (Sekunden) [5]: ").strip()
+                if not inp:
+                    self.config['reconnect_delay'] = 5.0
+                    break
+                try:
+                    v = float(inp)
+                    if v <= 0:
+                        print("    Muss groesser als 0 sein!")
+                        continue
+                    self.config['reconnect_delay'] = v
+                    break
+                except ValueError:
+                    print("    Bitte eine Zahl eingeben!")
+
         print()
         print("="*70)
         if self.observer_mode:
@@ -390,6 +441,8 @@ class WalletAnalysisRunner:
             print(f"   Take-Profit: +{self.TAKE_PROFIT_PERCENT:.0f}%")
             print(f"   Preis-Ausfall: Totalverlust nach {MAX_PRICE_FAILURES}x kein Preis")
         print(f"   Connection Timeout: {self.config['failure_threshold']}s")
+        source_label = "Free RPC Rotation (10 Endpunkte, 0 Credits)" if self.use_websocket else "Polling   (Helius HTTP, Credit-basiert)"
+        print(f"   Trade-Source:       {source_label}")
         print("="*70)
         print()
 
@@ -541,7 +594,7 @@ class WalletAnalysisRunner:
             logger.warning(f"{mode_tag}   BUY skipped  no price for {token[:8]}...")
             return
 
-        pos = account.open_position(token, price_eur)
+        pos = account.open_position(token, price_eur, observer_mode=self.observer_mode)
         if not pos:
             return
 
