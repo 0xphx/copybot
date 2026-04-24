@@ -1,31 +1,27 @@
 """
-Solana Free Polling Source - Ersatz fuer Helius ohne Credit-Limits
+Solana Multi-Key Polling Source - Helius Key Rotation
 
-Strategie: Mehrere kostenlose Public RPC Endpunkte rotieren.
-Kein Helius, keine Credits, kein logsSubscribe (zu unzuverlaessig auf Public RPCs).
+Strategie: Mehrere Helius API Keys rotieren im Round-Robin.
+Jeder Key hat 100k Credits/Tag.
+Beispiel: 3 Keys = 300k Credits/Tag (deckt ~277k bei 54-60 Wallets ab).
 
-Stattdessen: getSignaturesForAddress + getTransaction - identisch zu SolanaPollingSource,
-aber mit RPC-Rotation statt einem einzigen Helius-Endpunkt.
+Neue Keys erstellen: https://dev.helius.xyz/dashboard (kostenlos)
+Keys eintragen in: config/network.py -> HELIUS_API_KEYS
 
-Vorteile:
-- 0 Credits, kein Tageslimit
-- Mehrere Endpunkte -> kein Single Point of Failure
-- Identische Logik wie bewaehrtes Polling-System
+Wenn alle Helius-Keys erschoepft sind, wird automatisch auf
+kostenlose Public RPCs umgeschaltet (PUBLIC_FALLBACK_ENDPOINTS).
 
-Endpunkte (alle kostenlos, kein API-Key):
-  https://api.mainnet-beta.solana.com   (Solana Labs)
-  https://solana-api.projectserum.com   (Serum/Openbook)
-  https://rpc.ankr.com/solana           (Ankr)
-  https://solana-mainnet.g.alchemy.com/v2/demo  (Alchemy Demo)
+Identische Polling-Logik wie SolanaPollingSource (bewaehrt).
 """
 
 import asyncio
-import json
-import logging
 import itertools
-from typing import Optional, Dict, Set
+import logging
+from typing import Dict, Optional, Set
+
 import aiohttp
 
+from config.network import HELIUS_API_KEYS, HELIUS_HTTP_ENDPOINTS, PUBLIC_FALLBACK_ENDPOINTS
 from observation.models import TradeEvent
 from .base import TradeSource
 
@@ -37,37 +33,105 @@ CURRENCY_MINTS = {
     "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",
 }
 
-# Kostenlose Public RPC Endpunkte - kein API-Key noetig (Stand April 2026)
-# Quellen: comparenodes.com, solana.com/docs
-FREE_RPC_ENDPOINTS = [
-    "https://api.mainnet-beta.solana.com",       # Solana Foundation (offiziell)
-    "https://solana-rpc.publicnode.com",          # Allnodes (stabil, kein Key)
-    "https://solana.drpc.org",                    # dRPC (kein Key fuer Basic)
-    "https://solana.api.onfinality.io/public",   # OnFinality (kein Key)
-    "https://solana-mainnet.gateway.tatum.io",   # Tatum (kein Key fuer Free)
-    "https://public.rpc.solanavibestation.com",  # Solana Vibe Station
-    "https://solana.rpc.subquery.network/public",# SubQuery Network
-    "https://solana-api.projectserum.com",        # Serum/Openbook
-    "https://solana.api.pocket.network",          # Pocket Network
-    "https://rpc.ankr.com/solana",               # Ankr (kein Key fuer Public)
-]
+CREDITS_PER_MONTH = 1_000_000   # Helius Free Tier: 1 Mio Credits/Monat pro Key
+CREDITS_PER_DAY   = CREDITS_PER_MONTH // 30  # ~33,333/Tag (Richtwert fuer Tagesverbrauch)
+POLL_INTERVAL    = 3          # Sekunden zwischen Poll-Zyklen
+RPC_MAX_RPS      = 8          # Requests pro Sekunde pro Endpunkt (Helius: 8, Public: 5)
+PUBLIC_MAX_RPS   = 5
 
-# Rate Limits pro Endpunkt (konservativ)
-RPC_MAX_RPS = 5       # Requests pro Sekunde pro Endpunkt
-POLL_INTERVAL = 3     # Sekunden zwischen Poll-Zyklen
+
+class _KeySlot:
+    """Verwaltet einen einzelnen Helius API Key mit Credit-Tracking."""
+
+    def __init__(self, key: str, url: str):
+        self.key            = key
+        self.url            = url
+        self.label          = f"Helius ...{key[-6:]}"
+        self.credits        = 0        # verbrauchte Credits diesen Monat
+        self.credits_remaining: Optional[int] = None  # aus Helius-Header (exakt)
+        self.errors         = 0
+        self.exhausted      = False
+        self._month         = self._current_month()
+
+    @staticmethod
+    def _current_month():
+        from datetime import date
+        d = date.today()
+        return (d.year, d.month)
+
+    def _reset_if_new_month(self):
+        current = self._current_month()
+        if current != self._month:
+            self._month    = current
+            self.credits   = 0
+            self.exhausted = False
+            self.errors    = 0
+            print(f"[MultiKey] {self.label}: Neuer Monat - Credits zurueckgesetzt")
+
+    def record_success(self, cost: int = 1, headers=None):
+        self._reset_if_new_month()
+        self.credits += cost
+        self.errors   = 0
+
+        # Helius liefert exakte Restwerte im Response-Header
+        if headers:
+            # X-RateLimit-Remaining-Month oder X-Credits-Remaining
+            for hdr in ('x-ratelimit-remaining-month', 'x-credits-remaining',
+                        'ratelimit-remaining', 'x-ratelimit-remaining'):
+                val = headers.get(hdr)
+                if val is not None:
+                    try:
+                        self.credits_remaining = int(val)
+                        # Hochrechnen: verbraucht = limit - verbleibend
+                        self.credits = CREDITS_PER_MONTH - self.credits_remaining
+                    except (ValueError, TypeError):
+                        pass
+                    break
+
+        if self.credits >= CREDITS_PER_MONTH:
+            if not self.exhausted:
+                remaining = max(0, self.credits_remaining or 0)
+                print(f"[MultiKey] {self.label}: Monatslimit erreicht ({self.credits:,}/{CREDITS_PER_MONTH:,}, {remaining:,} verbleibend) - naechster Key")
+            self.exhausted = True
+        elif self.credits % 100_000 == 0 and self.credits > 0:
+            remaining = self.credits_remaining if self.credits_remaining is not None else (CREDITS_PER_MONTH - self.credits)
+            print(f"[MultiKey] {self.label}: {self.credits:,}/{CREDITS_PER_MONTH:,} Credits verbraucht ({remaining:,} verbleibend)")
+
+    def record_error(self, is_exhausted_error: bool = False):
+        self._reset_if_new_month()
+        self.errors += 1
+        if is_exhausted_error:
+            self.exhausted = True
+            print(f"[MultiKey] {self.label}: Limit erschoepft - Key uebersprungen")
+
+    def is_available(self) -> bool:
+        self._reset_if_new_month()
+        return not self.exhausted and self.errors < 5
+
+    def status_str(self) -> str:
+        state = "ERSCHOEPFT" if self.exhausted else ("FEHLER" if self.errors >= 5 else "OK")
+        if self.credits_remaining is not None:
+            # Exakter Wert aus Helius-Header verfuegbar
+            pct = (self.credits_remaining / CREDITS_PER_MONTH * 100)
+            return f"{self.label}: {self.credits_remaining:,} verbleibend ({pct:.0f}%)  [{state}]"
+        else:
+            # Schaetzung basierend auf lokalem Zaehler
+            remaining = max(0, CREDITS_PER_MONTH - self.credits)
+            pct       = (remaining / CREDITS_PER_MONTH * 100)
+            return f"{self.label}: ~{remaining:,} verbleibend ({pct:.0f}%)  [{state}] (geschaetzt)"
 
 
 class SolanaWebSocketSource(TradeSource):
     """
-    Freies Polling-System mit RPC-Rotation.
-    Gleiche Logik wie SolanaPollingSource, aber ohne Helius.
-    Name bleibt SolanaWebSocketSource fuer Kompatibilitaet mit wallet_analysis.py.
+    Polling-Source mit Helius Multi-Key Rotation.
+    Faellt automatisch auf Public RPCs zurueck wenn alle Keys erschoepft.
+    Interface-kompatibel mit SolanaPollingSource.
     """
 
     def __init__(
         self,
-        ws_url: str,         # wird nicht verwendet, aber Interface-kompatibel
-        http_url: str,       # wird als erster Endpunkt genutzt (falls kein Free RPC)
+        ws_url: str,          # nicht verwendet, Interface-kompatibel
+        http_url: str,        # nicht verwendet, Interface-kompatibel
         wallets: list = None,
         callback=None,
         ignore_initial_txs: bool = True,
@@ -77,69 +141,74 @@ class SolanaWebSocketSource(TradeSource):
     ):
         super().__init__()
 
-        self.wallets             = list(wallets or [])
-        self.ignore_initial_txs  = ignore_initial_txs
-        self.connection_monitor  = connection_monitor
-        self.reconnect_delay     = reconnect_delay
-        self.poll_interval       = POLL_INTERVAL
+        self.wallets            = list(wallets or [])
+        self.ignore_initial_txs = ignore_initial_txs
+        self.connection_monitor = connection_monitor
+        self.poll_interval      = POLL_INTERVAL
 
-        # RPC Endpunkte: Free RPCs bevorzugen, http_url als Fallback
-        self.rpc_endpoints = list(FREE_RPC_ENDPOINTS)
-        if http_url not in self.rpc_endpoints:
-            self.rpc_endpoints.append(http_url)
+        # Helius Keys als Slots
+        self._key_slots: list[_KeySlot] = [
+            _KeySlot(key, url)
+            for key, url in zip(HELIUS_API_KEYS, HELIUS_HTTP_ENDPOINTS)
+        ]
 
-        # Round-Robin Iterator ueber Endpunkte
-        self._rpc_cycle = itertools.cycle(self.rpc_endpoints)
-        self._endpoint_failures: Dict[str, int] = {ep: 0 for ep in self.rpc_endpoints}
+        # Public Fallback-Endpunkte
+        self._public_endpoints  = list(PUBLIC_FALLBACK_ENDPOINTS)
+        self._public_failures:  Dict[str, int] = {ep: 0 for ep in self._public_endpoints}
+        self._public_cycle      = itertools.cycle(self._public_endpoints)
+        self._using_fallback    = False
 
-        # Kompatibilitaet mit SolanaPollingSource Interface
-        self.rpc_http_url    = self.rpc_endpoints[0]  # fuer _check_for_missed_sells
+        # Kompatibilitaet
+        self.rpc_http_url    = HELIUS_HTTP_ENDPOINTS[0] if HELIUS_HTTP_ENDPOINTS else PUBLIC_FALLBACK_ENDPOINTS[0]
         self.is_fast_polling = False
         self.watch_wallets:  Set[str] = set()
 
-        self.running              = False
-        self.connected            = False
-        self.initial_load_done    = False
-        self.seen_signatures:     Set[str] = set()
+        self.running           = False
+        self.connected         = False
+        self.initial_load_done = False
+        self.seen_signatures:  Set[str] = set()
         self._session: Optional[aiohttp.ClientSession] = None
+
+        # Key-Rotation: Round-Robin Index
+        self._key_idx = 0
 
         if callback:
             self.on_trade = callback
 
-        print(f"[FreeRPC] Polling Source initialisiert (ohne Helius, ohne Credits)")
-        print(f"[FreeRPC] Endpunkte ({len(self.rpc_endpoints)}x rotierend):")
-        for ep in self.rpc_endpoints:
-            print(f"[FreeRPC]   {ep}")
-        print(f"[FreeRPC] Poll-Intervall: {POLL_INTERVAL}s | Max {RPC_MAX_RPS} req/s pro Endpunkt")
-        print(f"[FreeRPC] Watching {len(self.wallets)} wallets")
-        if connection_monitor:
-            print(f"[FreeRPC] Connection monitoring ENABLED")
+        self._print_startup()
+
+    def _print_startup(self):
+        n = len(self._key_slots)
+        total_month = n * CREDITS_PER_MONTH
+        days_total  = total_month // 277_000 if n else 0  # Tage Dauerbetrieb
+        print(f"[MultiKey] Helius Multi-Key Rotation gestartet")
+        print(f"[MultiKey] {n} Key(s) -> {total_month:,} Credits/Monat  (~{days_total} Tage Dauerbetrieb)")
+        for slot in self._key_slots:
+            print(f"[MultiKey]   {slot.status_str()}")
+        if self._public_endpoints:
+            print(f"[MultiKey] Fallback: {len(self._public_endpoints)} Public RPC(s) wenn alle Keys erschoepft")
+        print(f"[MultiKey] Poll-Intervall: {POLL_INTERVAL}s | Watching {len(self.wallets)} wallets")
 
     # ------------------------------------------------------------------
-    # PUBLIC API (identisch zu SolanaPollingSource)
+    # PUBLIC API
     # ------------------------------------------------------------------
 
     async def connect(self):
-        """Startet Polling-Loop mit RPC-Rotation."""
         self.running = True
-
         if self.connection_monitor:
             await self.connection_monitor.start()
 
         async with aiohttp.ClientSession() as session:
             self._session = session
-
             try:
                 while self.running:
                     await self._poll_all_wallets()
-
                     interval = (
                         self.poll_interval / 2
                         if self.is_fast_polling and self.watch_wallets
                         else self.poll_interval
                     )
                     await asyncio.sleep(interval)
-
             except asyncio.CancelledError:
                 self.running = False
                 raise
@@ -149,14 +218,18 @@ class SolanaWebSocketSource(TradeSource):
 
     def stop(self):
         self.running = False
-        print(f"[FreeRPC] Stopping...")
+        print("[MultiKey] Stopping...")
+        self._print_credit_summary()
 
     def get_polling_status(self) -> dict:
         status = {
-            'is_fast_polling':  self.is_fast_polling,
-            'watch_wallets':    list(self.watch_wallets),
-            'current_interval': self.poll_interval,
-            'endpoints':        self.rpc_endpoints,
+            'is_fast_polling': self.is_fast_polling,
+            'watch_wallets':   list(self.watch_wallets),
+            'using_fallback':  self._using_fallback,
+            'keys': [
+                {'label': s.label, 'credits': s.credits, 'exhausted': s.exhausted}
+                for s in self._key_slots
+            ],
         }
         if self.connection_monitor:
             status['connection'] = self.connection_monitor.get_status()
@@ -165,35 +238,112 @@ class SolanaWebSocketSource(TradeSource):
     def start_watching_wallets(self, wallets: list):
         self.watch_wallets   = set(wallets)
         self.is_fast_polling = True
-        print(f"[FreeRPC] FAST MODE fuer {len(wallets)} Wallets")
 
     def stop_watching_wallets(self):
         self.watch_wallets.clear()
         self.is_fast_polling = False
-        print(f"[FreeRPC] NORMAL MODE wiederhergestellt")
 
     def listen(self):
-        raise NotImplementedError("FreeRPC Source nutzt async connect()")
+        raise NotImplementedError("MultiKey Source nutzt async connect()")
 
     # ------------------------------------------------------------------
-    # POLLING LOOP
+    # ENDPUNKT-AUSWAHL
+    # ------------------------------------------------------------------
+
+    def _next_helius_url(self) -> Optional[str]:
+        """
+        Gibt die URL des naechsten verfuegbaren Helius-Keys zurueck.
+        Round-Robin, ueberspringt erschoepfte / fehlerhafte Keys.
+        Gibt None zurueck wenn alle Keys unavailable sind.
+        """
+        n = len(self._key_slots)
+        if n == 0:
+            return None
+        for _ in range(n):
+            slot = self._key_slots[self._key_idx % n]
+            self._key_idx += 1
+            if slot.is_available():
+                return slot.url
+        return None
+
+    def _next_public_url(self) -> Optional[str]:
+        """Gibt naechsten Public Fallback-Endpunkt zurueck."""
+        for _ in range(len(self._public_endpoints)):
+            ep = next(self._public_cycle)
+            if self._public_failures.get(ep, 0) < 5:
+                return ep
+        # Alle kaputt -> Reset
+        self._public_failures = {ep: 0 for ep in self._public_endpoints}
+        return self._public_endpoints[0] if self._public_endpoints else None
+
+    def _get_endpoint(self) -> tuple[Optional[str], bool]:
+        """
+        Gibt (url, is_helius) zurueck.
+        Helius bevorzugt, Public als Fallback.
+        """
+        url = self._next_helius_url()
+        if url:
+            if self._using_fallback:
+                self._using_fallback = False
+                print("[MultiKey] Helius-Key wieder verfuegbar - wechsel zurueck von Public Fallback")
+            return url, True
+
+        # Alle Helius-Keys erschoepft -> Public Fallback
+        if not self._using_fallback:
+            self._using_fallback = True
+            print("[MultiKey] Alle Helius-Keys erschoepft - wechsle auf Public Fallback RPCs")
+        return self._next_public_url(), False
+
+    def _record_success(self, url: str, is_helius: bool, headers=None):
+        if is_helius:
+            slot = next((s for s in self._key_slots if s.url == url), None)
+            if slot:
+                slot.record_success(cost=1, headers=headers)
+                # Alle N requests: kurzen Status ausgeben
+                if slot.credits % 10_000 == 0 and slot.credits > 0:
+                    print(f"[MultiKey] {slot.status_str()}")
+        else:
+            self._public_failures[url] = 0
+            if self.connection_monitor:
+                self.connection_monitor.record_success()
+
+    def _record_error(self, url: str, is_helius: bool, error: Exception):
+        err_str = str(error).lower()
+        exhausted = "max usage" in err_str or "429" in err_str or "rate limit" in err_str
+        if is_helius:
+            slot = next((s for s in self._key_slots if s.url == url), None)
+            if slot:
+                slot.record_error(is_exhausted_error=exhausted)
+        else:
+            self._public_failures[url] = self._public_failures.get(url, 0) + 1
+            fails = self._public_failures[url]
+            if fails <= 2:
+                logger.warning(f"[MultiKey] Public {url[:35]}... Fehler: {type(error).__name__} ({fails}/5)")
+            elif fails == 5:
+                print(f"[MultiKey] Public {url[:35]}... temporaer uebersprungen")
+
+    def _print_credit_summary(self):
+        print()
+        print("[MultiKey] Credit-Zusammenfassung:")
+        for slot in self._key_slots:
+            print(f"  {slot.status_str()}")
+
+    # ------------------------------------------------------------------
+    # POLLING
     # ------------------------------------------------------------------
 
     async def _poll_all_wallets(self):
-        """Fragt alle Wallets sequenziell in Batches ab."""
-        if self.is_fast_polling and self.watch_wallets:
-            wallets = list(self.watch_wallets)
-        else:
-            wallets = list(self.wallets)
+        wallets = (
+            list(self.watch_wallets)
+            if self.is_fast_polling and self.watch_wallets
+            else list(self.wallets)
+        )
 
         batch_size  = max(3, min(10, len(wallets) // 4 or 3))
-        min_delay   = batch_size / RPC_MAX_RPS
-        batch_delay = max(0.3, min_delay)
+        batch_delay = max(0.3, batch_size / RPC_MAX_RPS)
 
         for i in range(0, len(wallets), batch_size):
-            batch = wallets[i:i + batch_size]
-            # Sequenziell statt parallel - verhindert Race Conditions bei seen_signatures
-            for wallet in batch:
+            for wallet in wallets[i:i + batch_size]:
                 await self._poll_wallet(wallet)
             if i + batch_size < len(wallets):
                 await asyncio.sleep(batch_delay)
@@ -201,109 +351,87 @@ class SolanaWebSocketSource(TradeSource):
         if not self.initial_load_done:
             self.initial_load_done = True
             if self.ignore_initial_txs:
-                print(f"[FreeRPC] Initial load abgeschlossen - beobachte jetzt neue Transaktionen")
-
-    def _next_endpoint(self) -> str:
-        """Gibt naechsten Endpunkt aus dem Round-Robin zurück, ueberspringt kaputte."""
-        for _ in range(len(self.rpc_endpoints)):
-            ep = next(self._rpc_cycle)
-            if self._endpoint_failures.get(ep, 0) < 5:
-                return ep
-        # Alle kaputt -> Reset und ersten nehmen
-        self._endpoint_failures = {ep: 0 for ep in self.rpc_endpoints}
-        return self.rpc_endpoints[0]
+                print("[MultiKey] Initial load abgeschlossen - beobachte neue Transaktionen")
 
     async def _poll_wallet(self, wallet: str):
-        """Fragt neue Transaktionen einer Wallet ab."""
-        endpoint = self._next_endpoint()
+        url, is_helius = self._get_endpoint()
+        if not url:
+            logger.warning("[MultiKey] Kein Endpunkt verfuegbar - ueberspringe Wallet")
+            return
+
         try:
             payload = {
-                "jsonrpc": "2.0",
-                "id":      1,
+                "jsonrpc": "2.0", "id": 1,
                 "method":  "getSignaturesForAddress",
                 "params":  [wallet, {"limit": 5}]
             }
             async with self._session.post(
-                endpoint,
-                json=payload,
+                url, json=payload,
                 timeout=aiohttp.ClientTimeout(total=5)
             ) as response:
-                data = await response.json(content_type=None)
+                data    = await response.json(content_type=None)
+                headers = response.headers
 
-            # Nur globalen Monitor informieren wenn der primaere Endpunkt antwortet
-            if self.connection_monitor and endpoint == self.rpc_endpoints[0]:
-                self.connection_monitor.record_success()
+            self._record_success(url, is_helius, headers=headers)
 
-            self._endpoint_failures[endpoint] = 0
-
-            # Sicherheitscheck: manche Endpunkte liefern HTML/String statt JSON-Objekt
             if not isinstance(data, dict):
-                logger.debug(f"[FreeRPC] {endpoint[:30]}... liefert kein JSON-Objekt: {str(data)[:60]}")
                 return
-
             if "error" in data:
-                logger.debug(f"[FreeRPC] RPC Error {wallet[:8]}...: {data['error']}")
+                err = data["error"]
+                # Helius 'max usage reached' explizit erkennen
+                if isinstance(err, dict) and "max usage" in str(err.get("message", "")).lower():
+                    self._record_error(url, is_helius, Exception("max usage reached"))
+                else:
+                    logger.debug(f"[MultiKey] RPC Error {wallet[:8]}...: {err}")
                 return
 
             signatures = data.get("result", [])
             if not isinstance(signatures, list):
-                logger.debug(f"[FreeRPC] {endpoint[:30]}... result ist keine Liste")
                 return
-            new_sigs   = []
 
+            new_sigs = []
             for sig_info in signatures:
                 sig = sig_info.get("signature")
-                # Atomarer Check+Add verhindert Duplikate bei parallelen Tasks
                 if sig and sig not in self.seen_signatures:
                     self.seen_signatures.add(sig)
                     new_sigs.append(sig)
 
-            # Initial-Load: Signaturen merken aber nicht verarbeiten
             if not self.initial_load_done and self.ignore_initial_txs:
                 return
 
             if new_sigs:
-                print(f"[FreeRPC] {wallet[:8]}... hat {len(new_sigs)} neue TX(s)")
+                src = "Helius" if is_helius else "Public"
+                print(f"[MultiKey] {wallet[:8]}... {len(new_sigs)} neue TX(s)  [{src}]")
                 for sig in new_sigs:
-                    await self._fetch_and_process(sig, wallet, endpoint)
+                    await self._fetch_and_process(sig, wallet, url, is_helius)
 
         except (asyncio.TimeoutError, aiohttp.ClientError, OSError) as e:
-            # Endpunkt-Fehler zaehlen aber NICHT den globalen Connection Monitor triggern
-            # (einzelner kaputte Endpunkt != Netzwerkausfall)
-            self._endpoint_failures[endpoint] = self._endpoint_failures.get(endpoint, 0) + 1
-            fails = self._endpoint_failures[endpoint]
-            if fails <= 2:
-                logger.warning(f"[FreeRPC] {endpoint[:35]}... Fehler: {type(e).__name__} ({fails}/5)")
-            elif fails == 5:
-                print(f"[FreeRPC] {endpoint[:35]}... wird temporaer uebersprungen (5x Fehler)")
+            self._record_error(url, is_helius, e)
         except Exception as e:
-            logger.error(f"[FreeRPC] Unerwarteter Fehler bei {wallet[:8]}...: {e}", exc_info=True)
+            logger.error(f"[MultiKey] Unerwarteter Fehler bei {wallet[:8]}...: {e}", exc_info=True)
 
-    async def _fetch_and_process(self, signature: str, wallet: str, endpoint: str):
-        """Holt TX Details und extrahiert Trade - identisch zu SolanaPollingSource."""
+    async def _fetch_and_process(self, signature: str, wallet: str, url: str, is_helius: bool):
         try:
             payload = {
-                "jsonrpc": "2.0",
-                "id":      1,
+                "jsonrpc": "2.0", "id": 1,
                 "method":  "getTransaction",
-                "params":  [
-                    signature,
-                    {"encoding": "jsonParsed", "maxSupportedTransactionVersion": 0}
-                ]
+                "params":  [signature, {"encoding": "jsonParsed", "maxSupportedTransactionVersion": 0}]
             }
             async with self._session.post(
-                endpoint,
-                json=payload,
+                url, json=payload,
                 timeout=aiohttp.ClientTimeout(total=5)
             ) as response:
                 data = await response.json(content_type=None)
 
-            if not isinstance(data, dict):
-                logger.debug(f"[FreeRPC] getTransaction {signature[:8]}... kein JSON-Objekt")
-                return
+            if is_helius:
+                slot = next((s for s in self._key_slots if s.url == url), None)
+                if slot:
+                    slot.record_success(cost=1)  # getTransaction = 1 Credit
 
+            if not isinstance(data, dict):
+                return
             if "error" in data:
-                logger.debug(f"[FreeRPC] getTransaction Fehler {signature[:8]}...: {data['error']}")
+                logger.debug(f"[MultiKey] getTransaction Fehler {signature[:8]}...: {data['error']}")
                 return
 
             tx = data.get("result")
@@ -315,10 +443,13 @@ class SolanaWebSocketSource(TradeSource):
                 await self._emit_trade(trade_event)
 
         except Exception as e:
-            logger.error(f"[FreeRPC] _fetch_and_process Fehler: {e}", exc_info=True)
+            logger.error(f"[MultiKey] _fetch_and_process Fehler: {e}", exc_info=True)
+
+    # ------------------------------------------------------------------
+    # TRADE EXTRAKTION (identisch zu SolanaPollingSource)
+    # ------------------------------------------------------------------
 
     def extract_trade(self, tx: dict, wallet: str, signature: str) -> Optional[TradeEvent]:
-        """Identische Logik wie SolanaPollingSource.extract_trade()"""
         try:
             meta          = tx.get("meta", {})
             pre_balances  = meta.get("preTokenBalances", [])
@@ -327,8 +458,7 @@ class SolanaWebSocketSource(TradeSource):
             if not pre_balances and not post_balances:
                 return None
 
-            pre  = {}
-            post = {}
+            pre, post = {}, {}
             for b in pre_balances:
                 mint   = b.get("mint")
                 amount = b.get("uiTokenAmount", {}).get("uiAmount")
@@ -358,7 +488,7 @@ class SolanaWebSocketSource(TradeSource):
                 return TradeEvent(
                     wallet=wallet, token=asset_mint,
                     side="BUY" if asset_delta > 0 else "SELL",
-                    amount=abs(asset_delta), source="free_rpc_polling",
+                    amount=abs(asset_delta), source="helius_multikey",
                     raw_tx={"signature": signature, "meta": meta}
                 )
             elif asset_deltas:
@@ -366,13 +496,11 @@ class SolanaWebSocketSource(TradeSource):
                 return TradeEvent(
                     wallet=wallet, token=token,
                     side="BUY" if delta > 0 else "SELL",
-                    amount=abs(delta), source="free_rpc_polling",
+                    amount=abs(delta), source="helius_multikey",
                     raw_tx={"signature": signature, "meta": meta}
                 )
-
         except Exception as e:
-            logger.error(f"[FreeRPC] extract_trade Fehler: {e}", exc_info=True)
-
+            logger.error(f"[MultiKey] extract_trade Fehler: {e}", exc_info=True)
         return None
 
     async def _emit_trade(self, trade_event: TradeEvent):

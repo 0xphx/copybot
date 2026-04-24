@@ -37,7 +37,9 @@ data/*.db
 data/*.json
 data/*.bak
 
-# DB Sync Klon (separates Repo)
+# Deploy / Sync
+.devices.json
+.sync_tmp/
 .db_sync/
 .db_sync_remote
 

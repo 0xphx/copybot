@@ -22,31 +22,43 @@ RPC_HTTP_ENDPOINTS = {
 }
 
 # ============================================================
-# WEBSOCKET MODUS: Kostenlose Public Endpunkte (kein API-Key)
+# MULTI-KEY MODUS: Mehrere Helius API Keys rotieren
+# Jeder Key hat 100k Credits/Tag -> 3 Keys = 300k/Tag
+# Neue Keys erstellen: https://dev.helius.xyz/dashboard
+# Format: nur den Key eintragen, NICHT die volle URL
 # ============================================================
 
-# WebSocket URLs fuer logsSubscribe
+HELIUS_API_KEYS = [
+    "f607043d-baf5-4bcb-bd7e-c9fca54c5cff",  # Key 1
+    "c8ff413d-e106-42f2-8f83-ec7de75180df",  # Key 2
+]
+
+# Daraus generierte Endpunkte (automatisch, nicht manuell aendern)
+HELIUS_HTTP_ENDPOINTS = [
+    f"https://mainnet.helius-rpc.com/?api-key={key}"
+    for key in HELIUS_API_KEYS
+]
+
+# Fallback: Public RPCs wenn alle Helius-Keys erschoepft
+# Werden automatisch ans Ende der Rotation gehaengt
+PUBLIC_FALLBACK_ENDPOINTS = [
+    "https://api.mainnet-beta.solana.com",
+    "https://solana-rpc.publicnode.com",
+    "https://solana.drpc.org",
+]
+
+# Fuer Kompatibilitaet mit altem Code
 WS_ENDPOINTS = {
     NETWORK_MAINNET: "wss://api.mainnet-beta.solana.com",
     NETWORK_DEVNET:  "wss://api.devnet.solana.com",
     NETWORK_TESTNET: "wss://api.testnet.solana.com",
     NETWORK_LOCAL:   "ws://localhost:8900",
 }
-
-# HTTP URLs fuer getTransaction (nach WS-Notification)
 WS_HTTP_ENDPOINTS = {
-    NETWORK_MAINNET: "https://api.mainnet-beta.solana.com",
+    NETWORK_MAINNET: HELIUS_HTTP_ENDPOINTS[0] if HELIUS_HTTP_ENDPOINTS else "https://api.mainnet-beta.solana.com",
     NETWORK_DEVNET:  "https://api.devnet.solana.com",
     NETWORK_TESTNET: "https://api.testnet.solana.com",
     NETWORK_LOCAL:   "http://localhost:8899",
-}
-
-# Alternative kostenlose HTTP Endpunkte (Fallback / Rotation)
-WS_HTTP_FALLBACKS = {
-    NETWORK_MAINNET: [
-        "https://api.mainnet-beta.solana.com",
-        "https://solana-api.projectserum.com",
-    ],
 }
 
 # ============================================================

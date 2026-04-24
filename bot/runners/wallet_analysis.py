@@ -35,6 +35,7 @@ import signal
 import sys
 import logging
 from datetime import datetime
+from pathlib import Path
 from typing import Dict, Optional
 from dataclasses import dataclass, field
 
@@ -219,19 +220,11 @@ class WalletAnalysisRunner:
 
         # Zeige Wallet-Uebersicht mit Analysis-DB Scores (falls vorhanden)
         # (Nur zur Info vor Moduswahl - danach wird mit der richtigen DB neu geladen)
-        _preview_tracker = WalletTracker(db_path="data/wallet_performance.db")
-        conf_map = _preview_tracker.get_confidence_map(wallet_addresses)
-        known = [(w, s) for w, s in conf_map.items() if s != 0.2]
         print()
         print("="*70)
         print(" WALLET ANALYSIS / OBSERVER")
         print("="*70)
         print(f" {len(wallet_addresses)} Wallets geladen")
-        if known:
-            print(f" Bekannte Wallet Scores aus Analysis-DB ({len(known)}/{len(wallet_addresses)}):")
-            for w, s in sorted(known, key=lambda x: -x[1])[:10]:
-                label = _preview_tracker.get_strategy_label(w)
-                print(f"   {w[:20]}...  conf={s:.2f}  [{label}]")
         print()
 
         # Config (inkl. Moduswahl + Source-Wahl) -> setzt self.observer_mode, self.use_websocket
@@ -322,20 +315,20 @@ class WalletAnalysisRunner:
 
         print()
         print(" Trade-Source waehlen:")
-        print("   [P] Polling    - Helius HTTP RPC     (bisheriges System, ~277k Credits/Tag)")
-        print("   [W] Free RPC   - 10 Public Endpunkte (neues System, 0 Credits, rotierend)")
+        print("   [1] Multi-Key  - Helius Key-Rotation  (empfohlen, mehrere Keys rotieren)")
+        print("   [2] Polling    - Helius HTTP RPC      (einzelner Key, Credit-basiert)")
         print()
 
         while True:
-            inp = input(" Source [P]: ").strip().upper()
-            if not inp or inp == "P":
-                self.use_websocket = False
-                break
-            elif inp == "W":
+            inp = input(" Source [1]: ").strip()
+            if not inp or inp == "1":
                 self.use_websocket = True
                 break
+            elif inp == "2":
+                self.use_websocket = False
+                break
             else:
-                print("    Bitte P oder W eingeben!")
+                print("    Bitte 1 oder 2 eingeben!")
 
         print()
         print("Druecke ENTER fuer Standardwerte")
@@ -405,21 +398,6 @@ class WalletAnalysisRunner:
             except ValueError:
                 print("    Bitte eine ganze Zahl eingeben!")
 
-        if self.use_websocket:
-            while True:
-                inp = input("  WS Reconnect-Delay (Sekunden) [5]: ").strip()
-                if not inp:
-                    self.config['reconnect_delay'] = 5.0
-                    break
-                try:
-                    v = float(inp)
-                    if v <= 0:
-                        print("    Muss groesser als 0 sein!")
-                        continue
-                    self.config['reconnect_delay'] = v
-                    break
-                except ValueError:
-                    print("    Bitte eine Zahl eingeben!")
 
         print()
         print("="*70)
@@ -441,7 +419,7 @@ class WalletAnalysisRunner:
             print(f"   Take-Profit: +{self.TAKE_PROFIT_PERCENT:.0f}%")
             print(f"   Preis-Ausfall: Totalverlust nach {MAX_PRICE_FAILURES}x kein Preis")
         print(f"   Connection Timeout: {self.config['failure_threshold']}s")
-        source_label = "Free RPC Rotation (10 Endpunkte, 0 Credits)" if self.use_websocket else "Polling   (Helius HTTP, Credit-basiert)"
+        source_label = "Multi-Key Rotation (Helius)" if self.use_websocket else "Polling (Helius, einzelner Key)"
         print(f"   Trade-Source:       {source_label}")
         print("="*70)
         print()
@@ -767,6 +745,27 @@ class WalletAnalysisRunner:
     # 
 
     CANDIDATE_MIN_TRADES = 20  # Mindest-Trades fuer Vergleich
+
+    def _auto_sync(self):
+        """Synchronisiert DBs mit allen registrierten Geraeten nach Session-Ende."""
+        try:
+            # deploy.py liegt zwei Ebenen ueber bot/runners/
+            import sys, importlib.util
+            deploy_path = str(Path(__file__).parent.parent.parent / "deploy.py")
+            spec   = importlib.util.spec_from_file_location("deploy", deploy_path)
+            deploy = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(deploy)
+
+            devices = deploy.load_devices()
+            if not devices:
+                return  # Keine Geraete registriert - still beenden
+
+            print()
+            deploy.sync_all(push_after=True)
+
+        except Exception as e:
+            # Sync-Fehler sollen den Bot-Abschluss nie blockieren
+            logger.debug(f"[Sync] Fehler beim Auto-Sync: {e}")
 
     def _run_session_end_evaluate(self):
         """
@@ -1348,6 +1347,9 @@ class WalletAnalysisRunner:
         # Auto-Evaluate am Session-Ende (nur Observer-Modus)
         if self.observer_mode:
             self._run_session_end_evaluate()
+
+        # Auto-Sync mit allen registrierten Geraeten
+        self._auto_sync()
 
         if self.oracle:
             await self.oracle.close()
