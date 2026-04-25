@@ -38,10 +38,11 @@ data/*.json
 data/*.bak
 
 # Deploy / Sync
-.devices.json
+.devices.json       # Lokale Geraete-Liste MIT IPs - bleibt privat
 .sync_tmp/
 .db_sync/
 .db_sync_remote
+# devices.template.json geht IN Git (nur Labels, keine IPs)
 
 # Falls du später CSVs importierst
 data/*.csv

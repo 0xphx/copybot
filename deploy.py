@@ -18,9 +18,13 @@ import os
 import json
 from pathlib import Path
 
-SCRIPT_DIR   = Path(__file__).parent
-DEVICES_FILE = SCRIPT_DIR / ".devices.json"
-BOT_DIR      = SCRIPT_DIR / "bot"
+SCRIPT_DIR     = Path(__file__).parent
+DEVICES_FILE   = SCRIPT_DIR / ".devices.json"      # lokal, nicht in Git (enthaelt IPs)
+TEMPLATE_FILE  = SCRIPT_DIR / "devices.template.json"  # in Git, nur Labels
+BOT_DIR        = SCRIPT_DIR / "bot"
+
+# SSH Key fuer passwortlosen Zugriff (optional)
+SSH_KEY        = Path.home() / ".ssh" / "copybot_key"
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -37,7 +41,11 @@ def load_devices() -> list:
 
 
 def save_devices(devices: list):
+    """Speichert Geraete lokal (mit IPs) und Template (ohne IPs) in Git."""
     DEVICES_FILE.write_text(json.dumps(devices, indent=2))
+    # Template ohne IPs fuer Git
+    template = [{"label": d["label"]} for d in devices]
+    TEMPLATE_FILE.write_text(json.dumps(template, indent=2))
 
 
 def add_device(user: str, host: str, label: str):
@@ -46,9 +54,48 @@ def add_device(user: str, host: str, label: str):
         if d["host"] == host and d["user"] == user:
             print(f"  Geraet {label} ({user}@{host}) bereits registriert.")
             return
+        if d["label"] == label:
+            # Label bereits vorhanden - IP/User aktualisieren
+            d["host"] = host
+            d["user"] = user
+            save_devices(devices)
+            print(f"  Geraet '{label}' aktualisiert: {user}@{host}")
+            return
     devices.append({"user": user, "host": host, "label": label})
     save_devices(devices)
     print(f"  Geraet registriert: {label} ({user}@{host})")
+
+
+def sync_from_template():
+    """
+    Liest devices.template.json (aus Git) und fragt fuer jedes unbekannte
+    Geraet nach IP und User. So koennen PC und Laptop dieselben Geraete kennen
+    ohne dass IPs in Git landen.
+    """
+    if not TEMPLATE_FILE.exists():
+        return
+
+    template = json.loads(TEMPLATE_FILE.read_text())
+    devices  = load_devices()
+    known    = {d["label"] for d in devices}
+
+    new_devices = [t for t in template if t["label"] not in known]
+    if not new_devices:
+        return
+
+    print()
+    print(f"  {len(new_devices)} neue Geraete aus Template gefunden:")
+    for t in new_devices:
+        label = t["label"]
+        print(f"  -> '{label}' - bitte IP und User eingeben:")
+        try:
+            host = input(f"     IP fuer '{label}':   ").strip()
+            user = input(f"     User fuer '{label}': ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            continue
+        if host and user:
+            add_device(user, host, label)
 
 
 def list_devices():
@@ -66,23 +113,32 @@ def list_devices():
 # SSH Hilfsfunktionen
 # ──────────────────────────────────────────────────────────────────────────────
 
+def _ssh_key_args() -> list:
+    """Gibt SSH-Key Argumente zurueck falls copybot_key vorhanden."""
+    if SSH_KEY.exists():
+        return ["-i", str(SSH_KEY)]
+    return []
+
+
 def ssh_run(user: str, host: str, cmd: str, check: bool = True) -> subprocess.CompletedProcess:
     """Fuehrt einen Befehl per SSH aus."""
     full_cmd = ["ssh", "-o", "StrictHostKeyChecking=no",
                 "-o", "ConnectTimeout=10",
-                f"{user}@{host}", cmd]
+                ] + _ssh_key_args() + [f"{user}@{host}", cmd]
     return subprocess.run(full_cmd, capture_output=False, check=check)
 
 
 def scp_push(user: str, host: str, local: str, remote: str):
     """Kopiert eine Datei/Verzeichnis zum Server."""
-    cmd = ["scp", "-r", "-o", "StrictHostKeyChecking=no", local, f"{user}@{host}:{remote}"]
+    cmd = ["scp", "-r", "-o", "StrictHostKeyChecking=no"
+           ] + _ssh_key_args() + [local, f"{user}@{host}:{remote}"]
     subprocess.run(cmd, check=True)
 
 
 def scp_pull(user: str, host: str, remote: str, local: str):
     """Kopiert eine Datei/Verzeichnis vom Server."""
-    cmd = ["scp", "-r", "-o", "StrictHostKeyChecking=no", f"{user}@{host}:{remote}", local]
+    cmd = ["scp", "-r", "-o", "StrictHostKeyChecking=no"
+           ] + _ssh_key_args() + [f"{user}@{host}:{remote}", local]
     subprocess.run(cmd, check=True)
 
 
@@ -91,7 +147,7 @@ def test_connection(user: str, host: str) -> bool:
     try:
         result = subprocess.run(
             ["ssh", "-o", "StrictHostKeyChecking=no",
-             "-o", "ConnectTimeout=5", f"{user}@{host}", "echo ok"],
+             "-o", "ConnectTimeout=5"] + _ssh_key_args() + [f"{user}@{host}", "echo ok"],
             capture_output=True, text=True, timeout=10
         )
         return result.returncode == 0 and "ok" in result.stdout
@@ -254,10 +310,23 @@ def deploy(user: str, host: str, label: str):
     # 4. Requirements installieren
     print("  [4/6] Python-Packages installieren ...")
     req_file = BOT_DIR / "requirements.txt"
+    # --break-system-packages noetig fuer Kali Linux / Debian-basierte Systeme
+    pip_flags = "--break-system-packages -q"
     if req_file.exists():
-        ssh_run(user, host, "cd ~/copybot/bot && pip3 install -r requirements.txt -q")
+        ssh_run(user, host, f"cd ~/copybot/bot && pip3 install -r requirements.txt {pip_flags}", check=False)
+        # Fallback: virtuelle Umgebung wenn --break-system-packages nicht hilft
+        result = subprocess.run(
+            ["ssh", "-o", "StrictHostKeyChecking=no", f"{user}@{host}",
+             "cd ~/copybot/bot && python3 -c 'import aiohttp' 2>/dev/null && echo OK || echo FAIL"],
+            capture_output=True, text=True
+        )
+        if "FAIL" in result.stdout:
+            print("       pip direkt fehlgeschlagen - erstelle virtuelle Umgebung ...")
+            ssh_run(user, host,
+                "cd ~/copybot/bot && python3 -m venv .venv && "
+                ".venv/bin/pip install -r requirements.txt -q", check=False)
     else:
-        ssh_run(user, host, "pip3 install aiohttp websockets requests -q")
+        ssh_run(user, host, f"pip3 install aiohttp websockets requests {pip_flags}", check=False)
     print("       Packages installiert")
 
     # 5. Datenbanken synchronisieren (falls vorhanden)
@@ -319,7 +388,11 @@ def update_device(user: str, host: str, label: str):
         # Nur wenn Code geaendert wurde: pip install
         req = ssh_output(user, host, "test -f ~/copybot/bot/requirements.txt && echo YES || echo NO")
         if req == "YES":
-            ssh_run(user, host, "cd ~/copybot/bot && pip3 install -r requirements.txt -q", check=False)
+            # Kali/Debian braucht --break-system-packages
+            ssh_run(user, host,
+                "cd ~/copybot/bot && pip3 install -r requirements.txt --break-system-packages -q "
+                "|| .venv/bin/pip install -r requirements.txt -q 2>/dev/null || true",
+                check=False)
             print(f"  {label}: Packages aktualisiert")
 
     return True
@@ -504,6 +577,9 @@ def main():
     args = sys.argv[1:]
 
     if not args:
+        # Beim Start: Template pruefen und fehlende Geraete abfragen
+        sync_from_template()
+
         # Interaktiver Modus
         print()
         print("=" * 55)
