@@ -55,7 +55,6 @@ def add_device(user: str, host: str, label: str):
             print(f"  Geraet {label} ({user}@{host}) bereits registriert.")
             return
         if d["label"] == label:
-            # Label bereits vorhanden - IP/User aktualisieren
             d["host"] = host
             d["user"] = user
             save_devices(devices)
