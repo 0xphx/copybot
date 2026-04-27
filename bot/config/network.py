@@ -31,6 +31,11 @@ RPC_HTTP_ENDPOINTS = {
 HELIUS_API_KEYS = [
     "f607043d-baf5-4bcb-bd7e-c9fca54c5cff",  # Key 1
     "c8ff413d-e106-42f2-8f83-ec7de75180df",  # Key 2
+    "5c2e4c4f-7c06-4bfd-9fa7-8c9a4bbef8c1",  # Key 3
+    "d1f7153b-9bb1-4283-bf3b-ee2c2447d2a1",  # Key 4
+    "89c132ab-4c3b-44f2-9dd1-2a097aa2dddf",  # Key 5
+    "d4b8cabd-de8b-456b-81d3-24194ad0d174",  # Key 6
+    "8b8dd092-2619-4221-bd5a-2ed9856794fd",  # Key 7
 ]
 
 # Daraus generierte Endpunkte (automatisch, nicht manuell aendern)
