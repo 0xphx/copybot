@@ -151,7 +151,10 @@ def get_last_hour_summary(db_path: str, session_id: str) -> dict:
         conn.row_factory = sqlite3.Row
         cur  = conn.cursor()
 
-        since = (datetime.now() - timedelta(hours=1)).strftime("%Y-%m-%d %H:%M:%S")
+        since_dt  = datetime.now() - timedelta(hours=1)
+        # Beide Timestamp-Formate abdecken (mit T und mit Leerzeichen)
+        since_iso = since_dt.strftime("%Y-%m-%dT%H:%M:%S")
+        since_spc = since_dt.strftime("%Y-%m-%d %H:%M:%S")
 
         cur.execute("""
             SELECT
@@ -162,8 +165,9 @@ def get_last_hour_summary(db_path: str, session_id: str) -> dict:
                 ROUND(SUM(CASE WHEN side='SELL' AND price_missing=0 THEN pnl_eur ELSE 0 END),2) AS pnl,
                 COUNT(DISTINCT wallet) AS wallets
             FROM wallet_trades
-            WHERE session_id = ? AND timestamp >= ?
-        """, (session_id, since))
+            WHERE session_id = ?
+              AND (timestamp >= ? OR timestamp >= ?)
+        """, (session_id, since_iso, since_spc))
         row = dict(cur.fetchone())
         conn.close()
 
@@ -173,7 +177,7 @@ def get_last_hour_summary(db_path: str, session_id: str) -> dict:
 
         return {
             "period":   "last_60min",
-            "since":    since,
+            "since":    since_spc,
             "buys":     row["buys"],
             "sells":    sells,
             "wins":     wins,
@@ -263,16 +267,24 @@ def terminal_mode(db_path: str):
 
     while True:
         try:
-            now     = datetime.now()
-            # Naechste volle Stunde berechnen
+            now       = datetime.now()
             next_hour = now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
             wait      = (next_hour - now).total_seconds()
             print(f"[LiveLog] Naechste Zusammenfassung um {next_hour.strftime('%H:%M')} "
                   f"(in {int(wait//60)}m {int(wait%60)}s)")
-            time.sleep(wait)
 
-            # Session neu laden (koennte sich geaendert haben)
-            session_id = get_latest_session(db_path) or session_id
+            # In 60s-Intervallen warten und Session pruefen
+            elapsed = 0
+            while elapsed < wait:
+                sleep_time = min(60, wait - elapsed)
+                time.sleep(sleep_time)
+                elapsed += sleep_time
+                # Neueste Session pruefen (falls neue Session gestartet)
+                new_session = get_latest_session(db_path)
+                if new_session and new_session != session_id:
+                    session_id = new_session
+                    print(f"[LiveLog] Neue Session erkannt: {session_id}")
+
             print_hourly_summary(db_path, session_id)
 
         except KeyboardInterrupt:

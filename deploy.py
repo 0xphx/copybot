@@ -142,14 +142,17 @@ def scp_pull(user: str, host: str, remote: str, local: str):
 
 
 def test_connection(user: str, host: str) -> bool:
-    """Prueft ob SSH-Verbindung moeglich ist."""
+    """Prueft ob SSH-Verbindung moeglich ist - erlaubt Passwort-Eingabe."""
     try:
         result = subprocess.run(
             ["ssh", "-o", "StrictHostKeyChecking=no",
-             "-o", "ConnectTimeout=5"] + _ssh_key_args() + [f"{user}@{host}", "echo ok"],
-            capture_output=True, text=True, timeout=10
+             "-o", "ConnectTimeout=10",
+             "-o", "BatchMode=no",       # Passwort-Eingabe erlauben
+             ] + _ssh_key_args() + [f"{user}@{host}", "echo ok"],
+            capture_output=False,        # Terminal durchlassen
+            text=True, timeout=30
         )
-        return result.returncode == 0 and "ok" in result.stdout
+        return result.returncode == 0
     except Exception:
         return False
 
