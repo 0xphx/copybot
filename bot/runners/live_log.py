@@ -82,7 +82,7 @@ def get_session_summary(db_path: str, session_id: str) -> dict:
         # P&L pro Stunde
         cur.execute("""
             SELECT
-                strftime('%Y-%m-%d %H:00', timestamp) AS hour,
+                strftime('%Y-%m-%d %H:00', replace(timestamp, 'T', ' ')) AS hour,
                 COUNT(CASE WHEN side='SELL' THEN 1 END) AS sells,
                 COUNT(CASE WHEN side='SELL' AND pnl_eur > 0 AND price_missing=0 THEN 1 END) AS wins,
                 ROUND(SUM(CASE WHEN side='SELL' AND price_missing=0 THEN pnl_eur ELSE 0 END),2) AS pnl
@@ -166,7 +166,6 @@ def get_last_hour_summary(db_path: str, session_id: str) -> dict:
         cur  = conn.cursor()
 
         since_dt  = datetime.now() - timedelta(hours=1)
-        # Beide Timestamp-Formate abdecken (mit T und mit Leerzeichen)
         since_iso = since_dt.strftime("%Y-%m-%dT%H:%M:%S")
         since_spc = since_dt.strftime("%Y-%m-%d %H:%M:%S")
 
@@ -180,8 +179,8 @@ def get_last_hour_summary(db_path: str, session_id: str) -> dict:
                 COUNT(DISTINCT wallet) AS wallets
             FROM wallet_trades
             WHERE session_id = ?
-              AND (timestamp >= ? OR timestamp >= ?)
-        """, (session_id, since_iso, since_spc))
+              AND replace(timestamp, 'T', ' ') >= ?
+        """, (session_id, since_spc))
         row = dict(cur.fetchone())
         conn.close()
 
@@ -214,50 +213,120 @@ def print_hourly_summary(db_path: str, session_id: str):
     summary = get_session_summary(db_path, session_id)
     hourly  = get_last_hour_summary(db_path, session_id)
 
+    if "error" in summary:
+        print(f"[LiveLog] Fehler: {summary['error']}")
+        return
+
+    # Laufzeit und Session-Start
+    started_raw = summary.get('started', '')[:16].replace('T', ' ')
+    runtime     = summary.get('runtime', '?')
+
     print()
     print("=" * 65)
-    print(f"  LIVE LOG  |  {now}  |  Laufzeit: {summary.get('runtime','?')}")
+    print(f"  LIVE LOG  |  {now}  |  Laufzeit: {runtime}")
+    print(f"  Session:  {session_id}")
     print("=" * 65)
 
-    # Letzte Stunde
-    pnl_h   = hourly["pnl"]
-    sign_h  = "+" if pnl_h >= 0 else ""
-    print(f"  LETZTE STUNDE:")
-    print(f"    Trades:   {hourly['buys']} BUYs  |  {hourly['sells']} SELLs")
-    print(f"    Win Rate: {hourly['win_rate']:.1f}%  ({hourly['wins']}W / {hourly['losses']}L)")
-    print(f"    P&L:      {sign_h}{pnl_h:.2f} EUR")
+    # ── Letzte Stunde ──────────────────────────────────────────
+    pnl_h    = hourly.get("pnl", 0.0)
+    sells_h  = hourly.get("sells", 0)
+    buys_h   = hourly.get("buys", 0)
+    wins_h   = hourly.get("wins", 0)
+    losses_h = hourly.get("losses", 0)
+    wr_h     = hourly.get("win_rate", 0.0)
+    sign_h   = "+" if pnl_h >= 0 else ""
+    trend_h  = "▲" if pnl_h > 0 else ("▼" if pnl_h < 0 else "─")
+
+    since_str    = hourly.get("since", "")[:16]
+
+    # Pruefen ob Session juenger als 1 Stunde ist
+    session_age_min = 999
+    if summary.get("started"):
+        try:
+            started    = datetime.fromisoformat(summary["started"].replace("T", " ")[:19])
+            session_age_min = (datetime.now() - started).total_seconds() / 60
+        except Exception:
+            pass
+
+    if session_age_min < 60:
+        stunde_label = f"SEIT SESSION-START  ({started_raw} - jetzt)"
+    else:
+        stunde_label = f"LETZTE STUNDE  ({since_str} - jetzt)"
+
+    print(f"  {stunde_label}:")
+    if sells_h == 0:
+        print(f"    Keine abgeschlossenen Trades in dieser Stunde")
+    else:
+        print(f"    Trades:    {buys_h} BUYs  |  {sells_h} SELLs")
+        print(f"    Win Rate:  {wr_h:.1f}%  ({wins_h}W / {losses_h}L)")
+        print(f"    P&L:       {trend_h}  {sign_h}{pnl_h:.2f} EUR")
     print()
 
-    # Session gesamt
+    # ── Session Gesamt ─────────────────────────────────────────
     pnl_t   = summary["total_pnl"]
+    sells_t = summary["sells"]
+    buys_t  = summary["buys"]
+    wins_t  = summary["wins"]
+    loss_t  = summary["losses"]
+    wr_t    = summary["win_rate"]
     sign_t  = "+" if pnl_t >= 0 else ""
-    print(f"  SESSION GESAMT  ({summary.get('started','?')[:16]}):")
-    print(f"    Trades:   {summary['buys']} BUYs  |  {summary['sells']} SELLs")
-    print(f"    Win Rate: {summary['win_rate']:.1f}%  ({summary['wins']}W / {summary['losses']}L)")
-    print(f"    P&L:      {sign_t}{pnl_t:.2f} EUR")
-    print(f"    Wallets:  {summary['wallets']} aktiv")
+    trend_t = "▲" if pnl_t > 0 else ("▼" if pnl_t < 0 else "─")
+    missing = summary.get("price_missing", 0)
+
+    print(f"  SESSION GESAMT  (seit {started_raw}):")
+    print(f"    Trades:    {buys_t} BUYs  |  {sells_t} SELLs  |  {summary['wallets']} Wallets")
+    print(f"    Win Rate:  {wr_t:.1f}%  ({wins_t}W / {loss_t}L)", end="")
+    if missing:
+        print(f"  [{missing} ohne Preis]", end="")
+    print()
+    print(f"    P&L:       {trend_t}  {sign_t}{pnl_t:.2f} EUR")
     print()
 
-    # Top Wallets
-    if summary.get("top_wallets"):
+    # ── P&L pro Stunde (letzte 5) ──────────────────────────────
+    hourly_data = summary.get("hourly", [])
+    if len(hourly_data) > 1:  # Nur anzeigen wenn mehr als eine Stunde
+        print(f"  P&L PRO STUNDE:")
+        for h in hourly_data[-5:]:  # Letzte 5 Stunden
+            h_pnl  = h.get("pnl") or 0
+            h_sign = "+" if h_pnl >= 0 else ""
+            h_tr   = "▲" if h_pnl > 0 else ("▼" if h_pnl < 0 else "─")
+            h_wr   = (h["wins"] / h["sells"] * 100) if h.get("sells") else 0
+            print(f"    {h['hour'][11:16]} Uhr  {h_tr}  {h_sign}{h_pnl:>8.2f} EUR"
+                  f"  ({h.get('sells',0)} Trades, {h_wr:.0f}% WR)")
+        print()
+
+    # ── Top Wallets ────────────────────────────────────────────
+    top = [w for w in summary.get("top_wallets", []) if w.get("trades", 0) > 0]
+    if top:
         print(f"  TOP WALLETS:")
-        for w in summary["top_wallets"]:
+        for w in top:
             sign = "+" if w["pnl"] >= 0 else ""
             wr   = (w["wins"] / w["trades"] * 100) if w["trades"] > 0 else 0
-            print(f"    {w['wallet'][:12]}...  {sign}{w['pnl']:.2f} EUR  "
-                  f"({w['trades']}x, {wr:.0f}% WR)")
-    print()
+            bar  = "▲" if w["pnl"] > 0 else "▼"
+            print(f"    {bar} {w['wallet'][:12]}...  {sign}{w['pnl']:>8.2f} EUR"
+                  f"  ({w['trades']}x Trades, {wr:.0f}% WR)")
+        print()
 
-    # Letzte 3 Trades
+    # ── Letzte 3 Trades ────────────────────────────────────────
     recent = summary.get("recent_trades", [])[:3]
     if recent:
         print(f"  LETZTE TRADES:")
         for t in recent:
             pnl  = t.get("pnl_eur") or 0
             sign = "+" if pnl >= 0 else ""
+            bar  = "▲" if pnl > 0 else "▼"
             ts   = (t.get("timestamp") or "")[:16].replace("T", " ")
-            print(f"    {t['wallet'][:8]}...  {t['token'][:8]}...  "
-                  f"{sign}{pnl:.2f} EUR  {ts}")
+            reason = t.get("reason", "") or ""
+            # Grund kuerzen
+            reason_short = {
+                "WALLET_SOLD":          "Wallet sold",
+                "OBSERVER_STAGNATION":  "Stagnation",
+                "OBSERVER_MAX_HOLD":    "Max hold",
+                "SESSION_ENDED":        "Session end",
+            }.get(reason, reason[:12])
+            print(f"    {bar} {t['wallet'][:8]}...  {sign}{pnl:>8.2f} EUR"
+                  f"  {ts[11:16]} Uhr  [{reason_short}]")
+
     print("=" * 65)
 
 
