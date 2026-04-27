@@ -31,11 +31,23 @@ DB_ANALYSIS = "data/wallet_performance.db"
 # ──────────────────────────────────────────────────────────────────────────────
 
 def get_latest_session(db_path: str) -> str | None:
-    """Gibt die Session-ID der aktuellsten Session zurueck."""
+    """
+    Gibt die Session-ID der aktuellsten Session zurueck.
+    Nutzt session_id direkt (enthaelt Timestamp) statt letzten Trade-Timestamp.
+    Robust gegen SQLite-Lesesperren durch Bot.
+    """
     try:
-        conn = sqlite3.connect(db_path)
+        conn = sqlite3.connect(db_path, timeout=5)
+        conn.execute("PRAGMA journal_mode=WAL")  # Paralleles Lesen erlauben
         cur  = conn.cursor()
-        cur.execute("SELECT session_id FROM wallet_trades ORDER BY timestamp DESC LIMIT 1")
+        # Session-ID enthaelt Timestamp -> alphabetisch sortieren reicht
+        cur.execute("""
+            SELECT session_id
+            FROM wallet_trades
+            GROUP BY session_id
+            ORDER BY session_id DESC
+            LIMIT 1
+        """)
         row = cur.fetchone()
         conn.close()
         return row[0] if row else None
@@ -46,7 +58,8 @@ def get_latest_session(db_path: str) -> str | None:
 def get_session_summary(db_path: str, session_id: str) -> dict:
     """Laedt vollstaendige Zusammenfassung einer Session."""
     try:
-        conn = sqlite3.connect(db_path)
+        conn = sqlite3.connect(db_path, timeout=5)
+        conn.execute("PRAGMA journal_mode=WAL")
         conn.row_factory = sqlite3.Row
         cur  = conn.cursor()
 
@@ -147,7 +160,8 @@ def get_session_summary(db_path: str, session_id: str) -> dict:
 def get_last_hour_summary(db_path: str, session_id: str) -> dict:
     """Zusammenfassung der letzten 60 Minuten."""
     try:
-        conn = sqlite3.connect(db_path)
+        conn = sqlite3.connect(db_path, timeout=5)
+        conn.execute("PRAGMA journal_mode=WAL")
         conn.row_factory = sqlite3.Row
         cur  = conn.cursor()
 
