@@ -40,9 +40,21 @@
 - Neue Datei: `bot/observation/sources/solana_parallel_source.py`
 - `wallet_analysis.py` angepasst: Modus [3] beim Source-Start
 - Beim Start wählbar: Anzahl parallele Keys (1 bis max verfügbare Keys)
-- Wallets werden gleichmäßig auf Keys aufgeteilt (kein Overlap)
+- Wallets gleichmäßig auf Keys aufgeteilt (kein Overlap)
 - Dynamisches Rebalancing wenn ein Key erschöpft ist
 - Fallback auf Public RPCs wenn alle Keys erschöpft
+
+#### 7. Candidate-Pool auf 100 erweitert + Smart Selection ✅
+- `find_wallets.py`: `MAX_CANDIDATES = 100` (vorher 20)
+- `wallets/sync.py`: komplett überarbeitet
+  - Candidates werden nach Observer-Trade-Anzahl sortiert (meiste zuerst)
+  - Multi-Key / Polling: Top 20 Candidates werden beobachtet
+  - Parallel N Keys: Top 20×N Candidates werden beobachtet
+  - Ziel: vielversprechendste Candidates schnellstmöglich zur 20-Trade-Grenze bringen
+- `wallet_analysis.py`: Startreihenfolge geändert
+  - Config wird ZUERST abgefragt (Key-Anzahl wird benötigt)
+  - DANN `sync_wallets(num_parallel_keys)` aufgerufen
+  - Zusammenfassung zeigt jetzt an wie viele Candidates aktiv beobachtet werden
 
 ---
 
@@ -73,16 +85,24 @@ DBs:        python deploy.py sync
 
 ### Trade-Source Modi (beim Start wählbar)
 ```
-[1] Multi-Key     – sequenzielle Helius Key-Rotation (Standard)
-[2] Polling       – einzelner Helius Key
-[3] Parallel-Key  – N Keys gleichzeitig, Wallets aufgeteilt (NEU)
+[1] Multi-Key     – sequenzielle Helius Key-Rotation → Top 20 Candidates
+[2] Polling       – einzelner Helius Key             → Top 20 Candidates
+[3] Parallel-Key  – N Keys gleichzeitig              → Top 20×N Candidates
                     Beim Start: Anzahl Keys eingeben (1 bis max verfügbar)
+```
+
+### Candidate-System
+```
+Pool:        100 Candidates in axiom_wallets (find_wallets.py --apply)
+Beobachtet:  Top N nach Observer-Trades (meiste Trades = nächste zur Grenze)
+Grenze:      20 saubere SELLs → evaluate_wallets → Active oder Archived
+Auffüllen:   python find_wallets.py --apply  (fügt bis zu 20 neue hinzu)
 ```
 
 ### Helius Keys
 - 7 Keys konfiguriert in `config/network.py`
-- Key 1 leer, Keys 2–7 aktiv
-- Parallel-Modus: bis zu 6 Keys gleichzeitig nutzbar
+- Key 1 leer, Keys 2–7 aktiv (6 aktive Keys)
+- Parallel-Modus: bis zu 6 Keys gleichzeitig → bis zu 120 Candidates gleichzeitig
 
 ### Bot-Modi
 - **Observer Mode** (`observer_` prefix): Folgt Wallets 1:1, kein SL/TP
@@ -94,9 +114,9 @@ DBs:        python deploy.py sync
 - Beste Session: **+167.579 EUR** (März 2026)
 
 ### Offene Punkte
-- Parallel-Modus testen (noch nicht live geführt)
+- Alles aus diesem Chat deployen: `git push` → `git pull` auf Server
+- Parallel-Modus + neues Candidate-System testen (erste Session)
 - Laptop-Workflow via Tailscale testen (morgen Schule)
-- Candidate-Slots ggf. erhöhen wenn Parallel-Modus läuft
 - Live Log weiter verfeinern nach Bedarf
 - Dashboard: Freund baut auf API-Basis (Port 8080)
 
@@ -114,9 +134,13 @@ copybot/
 │   └── SNAPSHOT_Copybot_6.md           # Dieser Snapshot
 └── bot/
     ├── main.py
+    ├── find_wallets.py                  # MAX_CANDIDATES = 100
     ├── config/network.py               # 7 Helius Keys
+    ├── wallets/
+    │   ├── sync.py                     # Smart Candidate Selection (NEU)
+    │   └── repository.py
     ├── runners/
-    │   ├── wallet_analysis.py          # Hauptrunner (3 Source-Modi)
+    │   ├── wallet_analysis.py          # Config-first + 3 Source-Modi
     │   ├── live_log.py
     │   ├── logs.py
     │   └── keys.py
@@ -137,3 +161,4 @@ copybot/
 ## Repo
 - GitHub: `https://github.com/0xphx/copybot.git` (privat)
 - Server: `~/copybot` via git clone
+- Nächster Schritt: `git push` vom PC → `git pull` auf Server

@@ -36,6 +36,9 @@ HELIUS_API_KEYS = [
     "89c132ab-4c3b-44f2-9dd1-2a097aa2dddf",  # Key 5
     "d4b8cabd-de8b-456b-81d3-24194ad0d174",  # Key 6
     "8b8dd092-2619-4221-bd5a-2ed9856794fd",  # Key 7
+    "2979dd24-e705-433b-bf81-b1f19777d513",  # Key 8
+    "22a5feb7-5076-4f67-af69-5df36ddd2ae8",  # Key 9
+    "892aa557-289c-4bba-ab23-32f4a2b90701",  # Key 10
 ]
 
 # Daraus generierte Endpunkte (automatisch, nicht manuell aendern)

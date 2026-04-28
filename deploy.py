@@ -303,11 +303,30 @@ def deploy(user: str, host: str, label: str):
         print("  FEHLER: Server-Check fehlgeschlagen. Deploy abgebrochen.")
         return False
 
-    # 3. Code kopieren
+    # 3. Code kopieren (Git bevorzugt, scp als Fallback)
     print("  [3/6] Code kopieren ...")
-    ssh_run(user, host, "mkdir -p ~/copybot/bot/data")
-    scp_push(user, host, str(BOT_DIR), "~/copybot/")
-    print("       Code kopiert")
+    git_url = _get_git_url()
+    if git_url:
+        # Pruefen ob Git-Repo bereits vorhanden
+        check = subprocess.run(
+            ["ssh", "-o", "StrictHostKeyChecking=no"] + _ssh_key_args() +
+            [f"{user}@{host}", "test -d ~/copybot/.git && echo YES || echo NO"],
+            capture_output=True, text=True
+        )
+        if "YES" in check.stdout:
+            print("       Git-Repo vorhanden - fuehre git pull aus ...")
+            ssh_run(user, host, "cd ~/copybot && git pull", check=False)
+        else:
+            print("       Klone Repository via Git ...")
+            print(f"       URL: {git_url}")
+            print("       (Ggf. GitHub-Token als Passwort eingeben)")
+            ssh_run(user, host, f"rm -rf ~/copybot && git clone {git_url} ~/copybot", check=False)
+        print("       Code kopiert (via Git)")
+    else:
+        # scp-Fallback wenn kein Git-Remote konfiguriert
+        ssh_run(user, host, "mkdir -p ~/copybot/bot/data")
+        scp_push(user, host, str(BOT_DIR), "~/copybot/")
+        print("       Code kopiert (via scp)")
 
     # 4. Requirements installieren
     print("  [4/6] Python-Packages installieren ...")
@@ -365,6 +384,25 @@ def deploy(user: str, host: str, label: str):
     return True
 
 
+def _get_git_url() -> str | None:
+    """Liest Git-Remote-URL aus lokalem Repo aus (Token wird entfernt)."""
+    try:
+        result = subprocess.run(
+            ["git", "remote", "get-url", "origin"],
+            capture_output=True, text=True,
+            cwd=str(SCRIPT_DIR)
+        )
+        if result.returncode == 0:
+            import re
+            url = result.stdout.strip()
+            # Token aus URL entfernen - Server muss selbst authentifizieren
+            url = re.sub(r'https://[^@]+@', 'https://', url)
+            return url
+    except Exception:
+        pass
+    return None
+
+
 def update_device(user: str, host: str, label: str):
     """Fuehrt git pull + pip install auf einem Server aus."""
     print(f"  Update {label} ({user}@{host}) ...")
@@ -373,29 +411,39 @@ def update_device(user: str, host: str, label: str):
         print(f"  {label}: nicht erreichbar - uebersprungen")
         return False
 
-    # git pull
-    result = subprocess.run(
-        ["ssh", "-o", "StrictHostKeyChecking=no", f"{user}@{host}",
-         "cd ~/copybot && git pull 2>&1"],
+    # Pruefen ob Git-Repo vorhanden
+    check = subprocess.run(
+        ["ssh", "-o", "StrictHostKeyChecking=no"] + _ssh_key_args() +
+        [f"{user}@{host}", "test -d ~/copybot/.git && echo YES || echo NO"],
         capture_output=True, text=True
     )
-    output = result.stdout.strip()
-    if "Already up to date" in output:
-        print(f"  {label}: bereits aktuell")
-    elif "error" in output.lower() or result.returncode != 0:
-        print(f"  {label}: git pull Fehler: {output[:80]}")
-        return False
+
+    if "YES" in check.stdout:
+        # Git pull
+        result = subprocess.run(
+            ["ssh", "-o", "StrictHostKeyChecking=no"] + _ssh_key_args() +
+            [f"{user}@{host}", "cd ~/copybot && git pull 2>&1"],
+            capture_output=True, text=True
+        )
+        output = result.stdout.strip()
+        if "Already up to date" in output:
+            print(f"  {label}: bereits aktuell")
+        elif result.returncode != 0:
+            print(f"  {label}: git pull Fehler: {output[:80]}")
+            return False
+        else:
+            print(f"  {label}: Code aktualisiert")
+            req = ssh_output(user, host, "test -f ~/copybot/bot/requirements.txt && echo YES || echo NO")
+            if req == "YES":
+                ssh_run(user, host,
+                    "cd ~/copybot/bot && pip3 install -r requirements.txt --break-system-packages -q",
+                    check=False)
+                print(f"  {label}: Packages aktualisiert")
     else:
-        print(f"  {label}: Code aktualisiert")
-        # Nur wenn Code geaendert wurde: pip install
-        req = ssh_output(user, host, "test -f ~/copybot/bot/requirements.txt && echo YES || echo NO")
-        if req == "YES":
-            # Kali/Debian braucht --break-system-packages
-            ssh_run(user, host,
-                "cd ~/copybot/bot && pip3 install -r requirements.txt --break-system-packages -q "
-                "|| .venv/bin/pip install -r requirements.txt -q 2>/dev/null || true",
-                check=False)
-            print(f"  {label}: Packages aktualisiert")
+        # Kein Git-Repo - scp-Fallback
+        print(f"  {label}: Kein Git-Repo - kopiere per scp ...")
+        scp_push(user, host, str(BOT_DIR), "~/copybot/")
+        print(f"  {label}: Code kopiert")
 
     return True
 
