@@ -66,6 +66,10 @@ def main():
         from runners import logs
         logs.run(sys.argv[2:])
 
+    elif mode == "list":
+        from runners import wallet_list
+        wallet_list.run(sys.argv[2:])
+
     elif mode == "keys":
         from runners import keys
         keys.run(sys.argv[2:])
