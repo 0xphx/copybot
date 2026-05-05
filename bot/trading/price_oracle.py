@@ -23,6 +23,7 @@ class PriceOracle:
     def __init__(self):
         self.cache: Dict[str, float] = {}
         self.cache_time: Dict[str, float] = {}   # token → timestamp des letzten Fetches
+        self.liquidity_cache: Dict[str, float] = {}  # token → pool liquidity in EUR
         self.session: Optional[aiohttp.ClientSession] = None
         self.fetch_count = 0
         self.hit_count = 0
@@ -114,6 +115,11 @@ class PriceOracle:
                     return None
 
                 price_eur = price_usd * 0.92
+
+                liquidity_usd = float(best_pair.get("liquidity", {}).get("usd") or 0)
+                if liquidity_usd > 0:
+                    self.liquidity_cache[token_address] = liquidity_usd * 0.92
+
                 logger.info(f"[PriceOracle]  DexScreener: {token_address[:8]}... = {price_eur:.8f} EUR (${price_usd:.8f})")
                 return price_eur
                 
@@ -184,6 +190,10 @@ class PriceOracle:
             logger.warning(f"[PriceOracle] CoinGecko exception: {type(e).__name__}: {e}")
             return None
     
+    def get_cached_liquidity_eur(self, token_address: str) -> Optional[float]:
+        """Returns cached pool liquidity in EUR from last DexScreener fetch, or None."""
+        return self.liquidity_cache.get(token_address)
+
     def set_rate_limit_from_positions(self, open_positions: int):
         """
         Passt min_cache_seconds dynamisch an die Anzahl offener Positionen an.

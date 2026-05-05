@@ -20,6 +20,7 @@ class Position:
     entry_time: datetime
     cost_eur: float
     trigger_wallets: List[str]  # Wallets die den Trade ausgelöst haben
+    entry_fees_eur: float = 0.0  # buy-side fees paid (swap + network)
     
     @property
     def current_value_eur(self) -> float:
@@ -49,6 +50,8 @@ class Trade:
     trigger_wallets: List[str] = field(default_factory=list)
     pnl_eur: Optional[float] = None
     pnl_percent: Optional[float] = None
+    fees_eur: float = 0.0      # fees paid for this leg
+    slippage_pct: float = 0.0  # total slippage (impact + drift)
 
 
 class PaperPortfolio:
@@ -89,92 +92,120 @@ class PaperPortfolio:
         return True
     
     def open_position(
-        self, 
-        token: str, 
-        price_eur: float, 
-        trigger_wallets: List[str]
+        self,
+        token: str,
+        price_eur: float,
+        trigger_wallets: List[str],
+        executed_price_eur: Optional[float] = None,
+        fees_eur: float = 0.0,
+        slippage_pct: float = 0.0,
     ) -> Optional[Position]:
-        """Eröffnet eine neue Position"""
+        """Eröffnet eine neue Position.
+
+        executed_price_eur: actual fill price after slippage (defaults to price_eur).
+        fees_eur: swap + network fees paid on entry.
+        """
         if not self.can_open_position(token, price_eur):
             return None
-        
-        # 20% des Cash für diesen Trade
+
+        fill_price = executed_price_eur if executed_price_eur is not None else price_eur
+
+        # 20% des Cash für diesen Trade (vor Fees)
         investment_eur = self.cash_eur * self.position_size_percent
-        amount = investment_eur / price_eur
-        
+        amount = investment_eur / fill_price
+        total_cost = investment_eur + fees_eur
+
         position = Position(
             token=token,
-            entry_price_eur=price_eur,
+            entry_price_eur=fill_price,
             amount=amount,
             entry_time=datetime.now(),
             cost_eur=investment_eur,
-            trigger_wallets=trigger_wallets
+            trigger_wallets=trigger_wallets,
+            entry_fees_eur=fees_eur,
         )
-        
+
         self.positions[token] = position
-        self.cash_eur -= investment_eur
-        
-        # Trade Historie
+        self.cash_eur -= total_cost
+
         trade = Trade(
             token=token,
             side="BUY",
-            price_eur=price_eur,
+            price_eur=fill_price,
             amount=amount,
             value_eur=investment_eur,
             timestamp=datetime.now(),
-            trigger_wallets=trigger_wallets
+            trigger_wallets=trigger_wallets,
+            fees_eur=fees_eur,
+            slippage_pct=slippage_pct,
         )
         self.trade_history.append(trade)
-        
+
         logger.info(
             f"[PaperPortfolio]  BOUGHT {amount:.4f} {token[:8]}... "
-            f"@ {price_eur:.4f} EUR = {investment_eur:.2f} EUR"
+            f"@ {fill_price:.4f} EUR = {investment_eur:.2f} EUR | fees={fees_eur:.4f}€ slip={slippage_pct:+.2f}%"
         )
         logger.info(f"[PaperPortfolio] Cash remaining: {self.cash_eur:.2f} EUR")
-        
+
         return position
     
-    def close_position(self, token: str, price_eur: float, reason: str = "") -> Optional[Trade]:
-        """Schließt eine Position"""
+    def close_position(
+        self,
+        token: str,
+        price_eur: float,
+        reason: str = "",
+        executed_price_eur: Optional[float] = None,
+        fees_eur: float = 0.0,
+        slippage_pct: float = 0.0,
+    ) -> Optional[Trade]:
+        """Schließt eine Position.
+
+        executed_price_eur: actual fill price after sell-side slippage.
+        fees_eur: swap + network fees paid on exit.
+        """
         if token not in self.positions:
             logger.debug(f"[PaperPortfolio] Keine Position für {token}")
             return None
-        
+
         position = self.positions[token]
-        sell_value_eur = position.amount * price_eur
-        pnl_eur = position.pnl_eur(price_eur)
-        pnl_percent = position.pnl_percent(price_eur)
-        
-        # Cash zurück
-        self.cash_eur += sell_value_eur
-        
-        # Trade Historie
+        fill_price = executed_price_eur if executed_price_eur is not None else price_eur
+
+        sell_value_eur = position.amount * fill_price
+        # PnL = proceeds - total fees (entry + exit) - original investment
+        total_fees = position.entry_fees_eur + fees_eur
+        pnl_eur = sell_value_eur - position.cost_eur - total_fees
+        pnl_percent = (pnl_eur / position.cost_eur) * 100 if position.cost_eur else 0.0
+
+        # Cash zurück (after exit fees)
+        self.cash_eur += sell_value_eur - fees_eur
+
         trade = Trade(
             token=token,
             side="SELL",
-            price_eur=price_eur,
+            price_eur=fill_price,
             amount=position.amount,
             value_eur=sell_value_eur,
             timestamp=datetime.now(),
             trigger_wallets=position.trigger_wallets,
             pnl_eur=pnl_eur,
-            pnl_percent=pnl_percent
+            pnl_percent=pnl_percent,
+            fees_eur=fees_eur,
+            slippage_pct=slippage_pct,
         )
         self.trade_history.append(trade)
-        
-        # Position entfernen
+
         del self.positions[token]
-        
+
         emoji = "" if pnl_eur >= 0 else ""
         logger.info(
             f"[PaperPortfolio] {emoji} SOLD {trade.amount:.4f} {token[:8]}... "
-            f"@ {price_eur:.4f} EUR = {sell_value_eur:.2f} EUR"
+            f"@ {fill_price:.4f} EUR = {sell_value_eur:.2f} EUR | fees={fees_eur:.4f}€ slip={slippage_pct:+.2f}%"
         )
         logger.info(
             f"[PaperPortfolio] P&L: {pnl_eur:+.2f} EUR ({pnl_percent:+.2f}%) {reason}"
         )
         logger.info(f"[PaperPortfolio] Cash: {self.cash_eur:.2f} EUR")
-        
+
         return trade
     
     def has_position(self, token: str) -> bool:
@@ -197,10 +228,12 @@ class PaperPortfolio:
         losing_trades = [t for t in completed_trades if t.pnl_eur and t.pnl_eur < 0]
         
         win_rate = (len(winning_trades) / len(completed_trades) * 100) if completed_trades else 0
-        
+
         avg_win = sum(t.pnl_eur for t in winning_trades) / len(winning_trades) if winning_trades else 0
         avg_loss = sum(t.pnl_eur for t in losing_trades) / len(losing_trades) if losing_trades else 0
-        
+
+        total_fees = sum(t.fees_eur for t in self.trade_history)
+
         return {
             "initial_capital": self.initial_capital,
             "current_cash": self.cash_eur,
@@ -214,6 +247,7 @@ class PaperPortfolio:
             "win_rate": win_rate,
             "avg_win": avg_win,
             "avg_loss": avg_loss,
+            "total_fees": total_fees,
         }
     
     def print_summary(self, token_prices: Dict[str, float]):
@@ -235,6 +269,7 @@ class PaperPortfolio:
         print(f"Win Rate:            {stats['win_rate']:>12.1f}%")
         print(f"Avg Win:             {stats['avg_win']:>+12.2f} EUR")
         print(f"Avg Loss:            {stats['avg_loss']:>+12.2f} EUR")
+        print(f"Total Fees Paid:     {stats['total_fees']:>12.4f} EUR")
         print("="*70)
         
         if self.positions:
@@ -275,7 +310,9 @@ class PaperPortfolio:
                     "timestamp": t.timestamp.isoformat(),
                     "trigger_wallets": t.trigger_wallets,
                     "pnl_eur": t.pnl_eur,
-                    "pnl_percent": t.pnl_percent
+                    "pnl_percent": t.pnl_percent,
+                    "fees_eur": t.fees_eur,
+                    "slippage_pct": t.slippage_pct,
                 }
                 for t in self.trade_history
             ]

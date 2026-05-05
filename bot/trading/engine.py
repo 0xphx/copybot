@@ -11,6 +11,7 @@ from pattern.redundancy import TradeSignal
 from observation.models import TradeEvent
 from trading.portfolio import PaperPortfolio
 from trading.price_oracle import PriceOracle
+from trading.simulation import simulate_buy, simulate_sell
 
 logger = logging.getLogger(__name__)
 
@@ -76,13 +77,26 @@ class PaperTradingEngine:
         if not self.portfolio.can_open_position(token, price_eur):
             logger.warning(f"[TradingEngine]  Not enough capital for {token[:8]}...")
             return
-        
+
+        investment_eur = self.portfolio.cash_eur * self.portfolio.position_size_percent
+        liquidity_eur = self.oracle.get_cached_liquidity_eur(token)
+
+        sim = await simulate_buy(price_eur, investment_eur, liquidity_eur)
+        if not sim.success:
+            logger.warning(
+                f"[TradingEngine]  BUY simulation failed for {token[:8]}...: {sim.failure_reason}"
+            )
+            return
+
         position = self.portfolio.open_position(
             token=token,
             price_eur=price_eur,
-            trigger_wallets=signal.wallets
+            trigger_wallets=signal.wallets,
+            executed_price_eur=sim.executed_price_eur,
+            fees_eur=sim.fee_eur,
+            slippage_pct=sim.slippage_pct,
         )
-        
+
         if position:
             self.position_trigger_wallets[token] = set(signal.wallets)
             self.last_prices[token] = price_eur
@@ -159,14 +173,26 @@ class PaperTradingEngine:
         position = self.portfolio.positions.get(token)
         if not position:
             return
-        
+
+        liquidity_eur = self.oracle.get_cached_liquidity_eur(token)
+        position_value_eur = position.amount * price_eur
+
+        sim = await simulate_sell(price_eur, position_value_eur, liquidity_eur)
+        if not sim.success:
+            logger.warning(f"[TradingEngine]  SELL failed ({sim.failure_reason}) — retrying once")
+            sim = await simulate_sell(price_eur, position_value_eur, liquidity_eur)
+            if not sim.success:
+                logger.error(f"[TradingEngine]  SELL failed twice for {token[:8]}... — position stays open")
+                return
+
+        fill_price = sim.executed_price_eur
         entry_price = position.entry_price_eur
-        pnl_pct = ((price_eur - entry_price) / entry_price) * 100
-        pnl_eur = (price_eur - entry_price) * position.amount
-        
-        # Emoji für Ergebnis
+        total_fees = position.entry_fees_eur + sim.fee_eur
+        pnl_eur = position.amount * fill_price - position.cost_eur - total_fees
+        pnl_pct = (pnl_eur / position.cost_eur) * 100 if position.cost_eur else 0.0
+
         result_emoji = "" if pnl_eur >= 0 else ""
-        
+
         print()
         print("="*70)
         print(f"{result_emoji} SELL SIGNAL DETECTED! [{reason}]")
@@ -174,16 +200,20 @@ class PaperTradingEngine:
         print(f"Token:        {token[:15]}...")
         print(f"Trigger:      {trigger_label}")
         print(f"Entry Price:  {entry_price:.8f} EUR")
-        print(f"Exit Price:   {price_eur:.8f} EUR")
+        print(f"Exit Price:   {fill_price:.8f} EUR  (slip {sim.slippage_pct:+.2f}%)")
+        print(f"Fees Total:   {total_fees:.4f} EUR  (buy {position.entry_fees_eur:.4f} + sell {sim.fee_eur:.4f})")
         print(f"P&L:          {pnl_eur:+.2f} EUR ({pnl_pct:+.2f}%)")
         print(f"Quantity:     {position.amount:.4f}")
         print("="*70)
         print()
-        
+
         trade_result = self.portfolio.close_position(
             token=token,
             price_eur=price_eur,
-            reason=f"({trigger_label})"
+            reason=f"({trigger_label})",
+            executed_price_eur=fill_price,
+            fees_eur=sim.fee_eur,
+            slippage_pct=sim.slippage_pct,
         )
         
         if trade_result:
