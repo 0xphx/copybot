@@ -49,7 +49,7 @@ MIN_REALIZED_PNL  = 500     # Mindestens +500 USD Realized PnL
 MAX_AVG_HOLD_MIN  = 120     # Max 2h Haltedauer (0 = deaktiviert)
 MIN_AVG_HOLD_MIN  = 2       # Min 2 Min Haltedauer (0 = deaktiviert)
 DAYS_ACTIVE       = 3       # In den letzten 3 Tagen aktiv
-MAX_WALLETS       = 20      # Max. neue Wallets
+MAX_WALLETS       = 20      # Max. neue Wallets pro Aufruf
 
 # GMGN Einstellungen
 PERIOD            = "7d"
@@ -58,6 +58,8 @@ LIMIT             = 100
 BRIDGE_PORT       = 9876
 BRIDGE_TIMEOUT    = 60
 # -----------------------------------------------------------------------
+
+MAX_CANDIDATES = 100   # Gesamtpool an CandidateWallets
 
 SCRIPT_DIR   = Path(__file__).parent
 WALLETS_FILE = SCRIPT_DIR / "data" / "axiom_wallets.json"
@@ -68,7 +70,6 @@ _server_error  = None
 
 # -----------------------------------------------------------------------
 # LOKALER EMPFAENGER-SERVER
-# Nimmt POST /receive mit JSON-Body entgegen (vom Browser geschickt)
 # -----------------------------------------------------------------------
 
 class ReceiverHandler(BaseHTTPRequestHandler):
@@ -116,7 +117,7 @@ def _start_receiver(port: int):
 
 
 # -----------------------------------------------------------------------
-# METHODE 1: Direkter Python-Request (klappt wenn kein Cloudflare)
+# METHODE 1: Direkter Python-Request
 # -----------------------------------------------------------------------
 
 def _try_direct_fetch(period: str, tag: str, limit: int):
@@ -148,16 +149,10 @@ def _try_direct_fetch(period: str, tag: str, limit: int):
 
 
 # -----------------------------------------------------------------------
-# METHODE 2: Warten auf Browser-Inject
-# Claude-Extension oder User fuehrt JS im GMGN-Tab aus
+# METHODE 2: Browser-Inject
 # -----------------------------------------------------------------------
 
 def _fetch_via_browser(period: str, tag: str, limit: int) -> list:
-    """
-    Startet lokalen Server, zeigt JS-Snippet an.
-    Wenn Claude-Extension aktiv: Sie fuehrt das Snippet automatisch aus.
-    Sonst: User kopiert es in Browser-Konsole auf gmgn.ai.
-    """
     global _received_data, _server_error
     _received_data = None
     _server_error  = None
@@ -170,16 +165,6 @@ def _fetch_via_browser(period: str, tag: str, limit: int) -> list:
                   f"?orderby={orderby}&direction=desc&period={period}"
                   f"&tag={tag}&wallet_tag={tag}&limit={limit}")
 
-    # JS-Snippet das der Browser im GMGN-Tab ausfuehren soll
-    js = (
-        f"(async()=>{{const r=await fetch('{api_url}',{{headers:{{'Accept':'application/json',"
-        f"'Referer':'https://gmgn.ai/sol/wallets/smart_money'}},credentials:'include'}});"
-        f"const d=await r.json();window._gmgn_result=d;"
-        f"await fetch('http://127.0.0.1:{port}/receive',{{method:'POST',"
-        f"headers:{{'Content-Type':'application/json'}},body:JSON.stringify(d)}});"
-        f"return (d?.data?.rank||[]).length+' Wallets gesendet';}})();"
-    )
-
     print()
     print("=" * 70)
     print(" GMGN Browser-Inject")
@@ -190,7 +175,6 @@ def _fetch_via_browser(period: str, tag: str, limit: int) -> list:
     print()
     print(" [Manuell]: Oeffne gmgn.ai in Chrome -> F12 -> Console:")
     print()
-    # Lesbares Snippet fuer manuelle Ausfuehrung
     print(f"fetch('{api_url[:70]}...',")
     print(f"  {{headers:{{'Accept':'application/json'}},credentials:'include'}})")
     print(f".then(r=>r.json())")
@@ -199,7 +183,6 @@ def _fetch_via_browser(period: str, tag: str, limit: int) -> list:
     print()
     print("=" * 70)
 
-    # Warten auf Daten
     deadline = time.time() + BRIDGE_TIMEOUT
     while time.time() < deadline:
         if _received_data is not None:
@@ -220,13 +203,9 @@ def _fetch_via_browser(period: str, tag: str, limit: int) -> list:
 
 def _fetch_gmgn(period: str, tag: str, limit: int) -> list:
     print(f"[GMGN] Lade Wallets: tag={tag}, period={period}, limit={limit}...")
-
-    # Zuerst direkten Zugriff probieren
     rows = _try_direct_fetch(period, tag, limit)
     if rows:
         return rows
-
-    # Cloudflare blockiert -> Browser-Methode
     print("[GMGN] Cloudflare aktiv. Wechsle zu Browser-Methode...")
     return _fetch_via_browser(period, tag, limit)
 
@@ -258,11 +237,11 @@ def _normalize(row: dict, period: str) -> dict:
 
 
 def _filter_wallets(rows: list, period: str, existing_wallets: set = None) -> list:
-    cutoff  = datetime.now(timezone.utc) - timedelta(days=DAYS_ACTIVE)
+    cutoff   = datetime.now(timezone.utc) - timedelta(days=DAYS_ACTIVE)
     existing = existing_wallets or set()
-    results = []
-    skipped = {"no_addr": 0, "win_rate": 0, "trades": 0, "pnl": 0,
-               "hold_max": 0, "hold_min": 0, "inactive": 0, "existing": 0}
+    results  = []
+    skipped  = {"no_addr": 0, "win_rate": 0, "trades": 0, "pnl": 0,
+                "hold_max": 0, "hold_min": 0, "inactive": 0, "existing": 0}
 
     for row in rows:
         n = _normalize(row, period)
@@ -338,21 +317,16 @@ def _print_results(filtered: list, current_wallets: list, period: str, tag: str)
     return new_count
 
 
-MAX_CANDIDATES = 20  # Maximale Anzahl CandidateWallets in der JSON
-
-
 def _apply_wallets(filtered: list, current_wallets: list, replace_mode: bool):
     current_addrs = {w["wallet"] for w in current_wallets}
 
     if replace_mode:
         base        = [w for w in current_wallets if w.get("category") != "CandidateWallet"]
-        # Auf MAX_CANDIDATES begrenzen
         new_entries = [{"wallet": w["wallet"], "category": "CandidateWallet", "label": "smart"}
                        for w in filtered[:MAX_CANDIDATES]]
         updated     = base + new_entries
         print(f"[REPLACE] CandidateWallets ersetzt: {len(new_entries)} Eintraege.")
     else:
-        # Wie viele Candidates gibt es bereits?
         existing_candidates = [w for w in current_wallets if w.get("category") == "CandidateWallet"]
         free_slots = MAX_CANDIDATES - len(existing_candidates)
 
@@ -364,9 +338,9 @@ def _apply_wallets(filtered: list, current_wallets: list, replace_mode: bool):
         new_entries = [
             {"wallet": w["wallet"], "category": "CandidateWallet", "label": "smart"}
             for w in filtered if w["wallet"] not in current_addrs
-        ][:free_slots]  # Nur so viele wie noch Platz ist
+        ][:free_slots]
 
-        updated = current_wallets + new_entries
+        updated   = current_wallets + new_entries
         remaining = MAX_CANDIDATES - (len(existing_candidates) + len(new_entries))
         print(f"[APPLY] {len(new_entries)} neue CandidateWallets hinzugefuegt"
               f" ({len(existing_candidates) + len(new_entries)}/{MAX_CANDIDATES} belegt,"
@@ -390,7 +364,7 @@ def _apply_wallets(filtered: list, current_wallets: list, replace_mode: bool):
 def main():
     args    = sys.argv[1:]
     apply   = "--apply" in args
-    replace = False  # --replace absichtlich deaktiviert: bestehende Wallets bleiben immer
+    replace = False
 
     period = PERIOD
     if "--period" in args:

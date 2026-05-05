@@ -66,9 +66,17 @@ def main():
         from runners import logs
         logs.run(sys.argv[2:])
 
+    elif mode == "list":
+        from runners import wallet_list
+        wallet_list.run(sys.argv[2:])
+
     elif mode == "keys":
         from runners import keys
         keys.run(sys.argv[2:])
+
+    elif mode == "live_log":
+        from runners import live_log
+        live_log.run(sys.argv[2:])
 
     elif mode == "scann_all":
         from runners import scann_all
