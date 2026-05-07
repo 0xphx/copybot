@@ -13,6 +13,14 @@ Sind alle Keys erschoepft, greift der Public-RPC-Fallback.
 
 Neue Keys: https://dev.helius.xyz/dashboard
 Keys eintragen in: config/network.py -> HELIUS_API_KEYS
+
+Initial Load Logik:
+  Erster Polling-Durchlauf pro Key: Signaturen werden in seen_signatures
+  eingetragen aber NICHT verarbeitet (slot.initial_done = False).
+  Erst ab dem zweiten Durchlauf werden neue Signaturen als Trade-Events
+  verarbeitet (slot.initial_done = True).
+  So werden keine historischen Transaktionen faelschlicherweise als neue
+  Trades behandelt.
 """
 
 import asyncio
@@ -35,14 +43,10 @@ CURRENCY_MINTS = {
 }
 
 CREDITS_PER_MONTH = 1_000_000
-POLL_INTERVAL     = 3       # Sekunden zwischen Poll-Zyklen pro Key-Task
-RPC_MAX_RPS       = 8       # Max Requests/Sekunde pro Helius-Key
+POLL_INTERVAL     = 3
+RPC_MAX_RPS       = 8
 PUBLIC_MAX_RPS    = 5
 
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Key-Slot (identisch zu solana_ws_source.py, eigenstaendig um Abhaengigkeiten zu vermeiden)
-# ──────────────────────────────────────────────────────────────────────────────
 
 class _KeySlot:
     """Verwaltet einen einzelnen Helius API Key mit Credit-Tracking."""
@@ -56,7 +60,8 @@ class _KeySlot:
         self.errors            = 0
         self.exhausted         = False
         self._month            = self._current_month()
-        self.wallets:  List[str] = []   # aktuell zugewiesene Wallets
+        self.wallets:       List[str] = []
+        self.initial_done:  bool      = False  # True nach erstem vollstaendigen Polling-Durchlauf
 
     @staticmethod
     def _current_month():
@@ -125,10 +130,6 @@ class _KeySlot:
                     f"({pct:.0f}%)  [{state}]  {wallets_n} Wallets  (geschaetzt)")
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Parallel Source
-# ──────────────────────────────────────────────────────────────────────────────
-
 class SolanaParallelSource(TradeSource):
     """
     Jeder Key laeuft als eigener asyncio-Task und pollt seine Wallet-Gruppe.
@@ -158,17 +159,15 @@ class SolanaParallelSource(TradeSource):
         self._session: Optional[aiohttp.ClientSession] = None
         self._rebalance_lock    = asyncio.Lock()
 
-        # Public Fallback
-        self._public_endpoints  = list(PUBLIC_FALLBACK_ENDPOINTS)
+        self._public_endpoints       = list(PUBLIC_FALLBACK_ENDPOINTS)
         self._public_failures:  Dict[str, int] = {ep: 0 for ep in self._public_endpoints}
-        self._public_cycle      = itertools.cycle(self._public_endpoints)
-        self._using_fallback    = False
-        self._fallback_wallets: List[str] = []  # Wallets die auf Public laufen
+        self._public_cycle           = itertools.cycle(self._public_endpoints)
+        self._using_fallback         = False
+        self._fallback_wallets: List[str] = []
+        self._fallback_initial_done: bool  = False  # True nach erstem Fallback-Durchlauf
 
-        # Kompatibilitaet mit wallet_analysis.py
         self.rpc_http_url = HELIUS_HTTP_ENDPOINTS[0] if HELIUS_HTTP_ENDPOINTS else PUBLIC_FALLBACK_ENDPOINTS[0]
 
-        # Verfuegbare Keys auf num_parallel_keys begrenzen
         available_keys = [(k, u) for k, u in zip(HELIUS_API_KEYS, HELIUS_HTTP_ENDPOINTS)]
         if num_parallel_keys > len(available_keys):
             print(f"[Parallel] Nur {len(available_keys)} Keys verfuegbar, "
@@ -181,7 +180,6 @@ class SolanaParallelSource(TradeSource):
             for key, url in available_keys[:num_parallel_keys]
         ]
 
-        # Initiale Wallet-Aufteilung
         self._distribute_wallets()
         self._print_startup()
 
@@ -190,57 +188,38 @@ class SolanaParallelSource(TradeSource):
     # ──────────────────────────────────────────────────────────────────
 
     def _distribute_wallets(self):
-        """Verteilt alle Wallets gleichmaessig auf verfuegbare Keys."""
         active_slots = [s for s in self._key_slots if s.is_available()]
         if not active_slots:
             self._fallback_wallets = list(self.all_wallets)
             return
-
-        # Alle Wallet-Listen leeren
         for slot in self._key_slots:
             slot.wallets = []
         self._fallback_wallets = []
-
-        # Round-Robin Verteilung
         for i, wallet in enumerate(self.all_wallets):
             active_slots[i % len(active_slots)].wallets.append(wallet)
 
     async def _rebalance(self):
-        """
-        Wird aufgerufen wenn ein Key erschoepft ist.
-        Verteilt seine Wallets auf verbleibende aktive Keys.
-        """
         async with self._rebalance_lock:
-            active_slots    = [s for s in self._key_slots if s.is_available()]
-            inactive_slots  = [s for s in self._key_slots if not s.is_available()]
-
+            active_slots   = [s for s in self._key_slots if s.is_available()]
+            inactive_slots = [s for s in self._key_slots if not s.is_available()]
             if not inactive_slots:
-                return  # Nichts zu tun
-
-            # Verwaiste Wallets einsammeln
+                return
             orphaned = []
             for slot in inactive_slots:
                 orphaned.extend(slot.wallets)
                 slot.wallets = []
-
             if not orphaned:
                 return
-
             print(f"[Parallel] Rebalancing: {len(orphaned)} Wallets von "
-                  f"{len(inactive_slots)} ausgefallenen Key(s) umverteilen...")
-
+                  f"{len(inactive_slots)} ausgefallenen Key(s)...")
             if not active_slots:
-                # Alle Keys erschoepft -> Public Fallback
                 if not self._using_fallback:
                     self._using_fallback = True
                     print("[Parallel] Alle Keys erschoepft - wechsle auf Public Fallback")
                 self._fallback_wallets.extend(orphaned)
                 return
-
-            # Gleichmaessig auf aktive Keys verteilen
             for i, wallet in enumerate(orphaned):
                 active_slots[i % len(active_slots)].wallets.append(wallet)
-
             print(f"[Parallel] Rebalancing abgeschlossen:")
             for slot in active_slots:
                 print(f"  {slot.label}: {len(slot.wallets)} Wallets")
@@ -260,7 +239,7 @@ class SolanaParallelSource(TradeSource):
             print(f"  {slot.label}: {len(slot.wallets)} Wallets")
         if self._public_endpoints:
             print(f"[Parallel] Fallback: {len(self._public_endpoints)} Public RPC(s)")
-        print(f"[Parallel] Poll-Intervall: {POLL_INTERVAL}s pro Key-Task")
+        print(f"[Parallel] Poll-Intervall: {POLL_INTERVAL}s | Initial Load aktiv")
         print()
 
     # ──────────────────────────────────────────────────────────────────
@@ -271,15 +250,10 @@ class SolanaParallelSource(TradeSource):
         self.running = True
         if self.connection_monitor:
             await self.connection_monitor.start()
-
         async with aiohttp.ClientSession() as session:
             self._session = session
             try:
-                # Einen Task pro Key + optionaler Fallback-Task
-                tasks = [
-                    asyncio.create_task(self._key_task(slot))
-                    for slot in self._key_slots
-                ]
+                tasks = [asyncio.create_task(self._key_task(slot)) for slot in self._key_slots]
                 tasks.append(asyncio.create_task(self._fallback_task()))
                 await asyncio.gather(*tasks, return_exceptions=True)
             except asyncio.CancelledError:
@@ -298,27 +272,28 @@ class SolanaParallelSource(TradeSource):
         raise NotImplementedError("ParallelSource nutzt async connect()")
 
     # ──────────────────────────────────────────────────────────────────
-    # Key-Task (laeuft pro Key parallel)
+    # Key-Task
     # ──────────────────────────────────────────────────────────────────
 
     async def _key_task(self, slot: _KeySlot):
-        """Eigener Poll-Loop fuer einen Key. Pollt nur seine Wallet-Gruppe."""
-        initial_done = False
+        """
+        Poll-Loop fuer einen Key.
+        Erster Durchlauf: slot.initial_done = False → Signaturen nur registrieren.
+        Zweiter Durchlauf+: slot.initial_done = True → echte Trades verarbeiten.
+        """
         print(f"[Parallel] Task gestartet: {slot.label} ({len(slot.wallets)} Wallets)")
 
         while self.running:
             if not slot.is_available():
-                # Key erschoepft -> Rebalancing ausloesen und Task beenden
                 await self._rebalance()
                 print(f"[Parallel] Task beendet: {slot.label} (erschoepft)")
                 return
 
-            wallets = list(slot.wallets)  # Snapshot, falls Rebalancing laeuft
+            wallets    = list(slot.wallets)
             if not wallets:
                 await asyncio.sleep(POLL_INTERVAL)
                 continue
 
-            # Wallets in Batches aufteilen
             batch_size  = max(3, min(10, len(wallets) // 4 or 3))
             batch_delay = max(0.3, batch_size / RPC_MAX_RPS)
 
@@ -330,18 +305,19 @@ class SolanaParallelSource(TradeSource):
                 if i + batch_size < len(wallets):
                     await asyncio.sleep(batch_delay)
 
-            if not initial_done and self.ignore_initial_txs:
-                initial_done = True
-                print(f"[Parallel] {slot.label}: Initial load abgeschlossen")
+            # Nach erstem vollstaendigen Durchlauf: Initial Load abgeschlossen
+            if not slot.initial_done and self.ignore_initial_txs:
+                slot.initial_done = True
+                print(f"[Parallel] {slot.label}: Initial load abgeschlossen "
+                      f"({len(self.seen_signatures)} Signaturen registriert, neue Trades werden ab jetzt erkannt)")
 
             await asyncio.sleep(POLL_INTERVAL)
 
     # ──────────────────────────────────────────────────────────────────
-    # Fallback-Task (Public RPC fuer erschoepfte Keys)
+    # Fallback-Task
     # ──────────────────────────────────────────────────────────────────
 
     async def _fallback_task(self):
-        """Pollt Wallets die keinem Helius-Key mehr zugewiesen sind."""
         while self.running:
             wallets = list(self._fallback_wallets)
             if not wallets:
@@ -358,6 +334,9 @@ class SolanaParallelSource(TradeSource):
                     await self._poll_wallet_public(wallet)
                 if i + batch_size < len(wallets):
                     await asyncio.sleep(batch_delay)
+
+            if not self._fallback_initial_done and self.ignore_initial_txs:
+                self._fallback_initial_done = True
 
             await asyncio.sleep(POLL_INTERVAL)
 
@@ -387,7 +366,10 @@ class SolanaParallelSource(TradeSource):
                     slot.record_error(is_exhausted_error=True)
                 return
 
-            await self._process_signatures(data.get("result", []), wallet, slot.url, slot)
+            await self._process_signatures(
+                data.get("result", []), wallet, slot.url, slot,
+                process=slot.initial_done  # False beim ersten Durchlauf → kein Trade
+            )
 
         except (asyncio.TimeoutError, aiohttp.ClientError, OSError) as e:
             slot.record_error(is_exhausted_error=False)
@@ -414,13 +396,28 @@ class SolanaParallelSource(TradeSource):
             self._public_failures[url] = 0
             if not isinstance(data, dict) or "error" in data:
                 return
-            await self._process_signatures(data.get("result", []), wallet, url, slot=None)
+            await self._process_signatures(
+                data.get("result", []), wallet, url, slot=None,
+                process=self._fallback_initial_done
+            )
 
         except Exception as e:
             self._public_failures[url] = self._public_failures.get(url, 0) + 1
             logger.debug(f"[Parallel] Public Fehler {wallet[:8]}...: {type(e).__name__}")
 
-    async def _process_signatures(self, signatures: list, wallet: str, url: str, slot: Optional[_KeySlot]):
+    async def _process_signatures(
+        self,
+        signatures: list,
+        wallet: str,
+        url: str,
+        slot: Optional[_KeySlot],
+        process: bool = True
+    ):
+        """
+        Verarbeitet Signaturen.
+        process=False (Initial Load): Signaturen nur in seen_signatures eintragen, kein Trade.
+        process=True:                 Neue Signaturen als Trade-Events verarbeiten.
+        """
         if not isinstance(signatures, list):
             return
 
@@ -428,15 +425,14 @@ class SolanaParallelSource(TradeSource):
         for sig_info in signatures:
             sig = sig_info.get("signature")
             if sig and sig not in self.seen_signatures:
-                self.seen_signatures.add(sig)
+                self.seen_signatures.add(sig)  # Immer registrieren
                 new_sigs.append(sig)
 
         if not new_sigs:
             return
 
-        # Initial load ignorieren
-        initial_done = slot is not None  # Fallback-Task hat kein Slot-Tracking -> immer verarbeiten
-        if self.ignore_initial_txs and not initial_done:
+        # Initial Load: Signaturen wurden registriert, aber keine Trade-Events
+        if not process:
             return
 
         src = slot.label if slot else "Public"
@@ -494,7 +490,6 @@ class SolanaParallelSource(TradeSource):
             print(f"  {slot.status_str()}")
 
     def extract_trade(self, tx: dict, wallet: str, signature: str) -> Optional[TradeEvent]:
-        """Identisch zu SolanaWebSocketSource.extract_trade."""
         try:
             meta          = tx.get("meta", {})
             pre_balances  = meta.get("preTokenBalances", [])
