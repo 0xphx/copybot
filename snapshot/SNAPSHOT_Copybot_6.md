@@ -2,78 +2,75 @@
 
 ## Meta
 - **Chat-Nummer:** 6
-- **Datum:** 2026-04-27
-- **Dateizugriff:** Claude in Chrome Filesystem MCP (direkter Zugriff auf Originaldateien)
+- **Datum:** 2026-04-27 bis 2026-05-07
+- **Dateizugriff:** Claude in Chrome Filesystem MCP
 - **Projektpfad:** `C:\Users\phili\Documents\GitHub\copybot`
 
 ---
 
-## Session-Zusammenfassung
+## Was in diesem Chat erledigt wurde
 
-### Was in diesem Chat erledigt wurde
+### Setup & Infrastruktur
+- Claude Filesystem-Zugriff eingerichtet (`snapshot/CLAUDE_SETUP.md`)
+- `snapshot/CLAUDE_SETUP_FX.md` für copybotfx Chat erstellt
+- GitHub → Server eingerichtet: `git clone`, `git pull` funktioniert ✅
+- Snapshot-Struktur auf `snapshot/` Ordner umgestellt
+- Live Log screen mit Scrollback: `screen -S livelog -h 5000`
 
-#### 1. Projekt eingelesen
-- ZIP-Upload + direkter Filesystem-Zugriff eingerichtet
-- Alle Kerndateien gelesen
+### Neue Features
+- **Parallel-Key Source** (`solana_parallel_source.py`) – Bug gefixt (Initial Load)
+- **Candidate-Pool** auf 100 erweitert, Smart Selection nach Observer-Trades
+- **wallet_list.py** – HTML Übersicht mit Webserver (Port 7432)
+  - Ausschluss einzelner Trades mit Häkchen (gespeichert in `excluded_trades.json`)
+  - Confidence Score Breakdown Popup (anklickbar)
+  - Live-Neuberechnung ohne ausgeschlossene Trades
 
-#### 2. Claude Filesystem-Zugriff eingerichtet
-- `snapshot/CLAUDE_SETUP.md` erstellt
-- Voraussetzung: Claude in Chrome Extension + Filesystem MCP aktiv
+### Neue Confidence-Formel
+```
+score = (WinRate × 0.55 + tanh(AvgPnL/50) × 0.45) × min(n/100, 1.0)
+```
+- Trade-Faktor dämpft proportional bis 100 Trades
+- Minimum 5 Trades für echten Score, sonst 0.0
+- `recalc_confidence.py` für einmalige Neuberechnung aller Wallets
 
-#### 3. GitHub → Server Einrichtung ✅
-- Repo: `https://github.com/0xphx/copybot.git` (privat, gehört Freund)
-- `git clone` mit Personal Access Token (HTTPS) erfolgreich
-- Token versehentlich im Chat sichtbar → sofort widerrufen + neues Token gesetzt
-- `git pull` getestet → "Bereits aktuell" ✅
-- `deploy.py update` nutzt intern bereits `git pull` → kein Umbau nötig
+### Transaction Cost Model (`trading/cost_model.py`) ✅ NEU
+```
+Kosten pro Seite = Netzwerk-Fee + Swap-Fee (0.25%) + Price Impact + Market Drift + Failure Cost
+Default Pool-Liquidität: ~$30K EUR
+Typische Kosten: 1.3% - 4.5% pro Seite
+```
+- `effective_pnl_eur` = raw PnL − (BUY-Kosten + SELL-Kosten)
+- Wird nur im Analysis-Modus angewendet, nicht im Observer-Modus
 
-#### 4. Snapshot-Struktur geändert
-- Alle zukünftigen Snapshots kommen in den `snapshot/` Ordner
-- Claude führt während des Chats eine laufende Snapshot-Datei (diese hier)
+### Analysis-Modus überarbeitet ✅
+- Transaktionskosten bei BUY und SELL eingerechnet
+- Entry/Exit-Preis mit Kosten-Offset angezeigt
+- PriceMonitor zeigt: `Raw PnL | Eff. PnL | Change%`
+- SL/TP aus Observer-DB abgeleitet (via `_get_observer_sl_tp`)
+- Ergebnis-Tabelle zeigt Raw PnL + Effective PnL + SL/TP pro Wallet
 
-#### 5. Live Log – screen Scrollback ✅
-- Problem: Terminal-Modus nicht scrollbar
-- Lösung: `screen -S livelog -h 5000` → 5000 Zeilen Scrollback-Buffer
-- Scroll-Modus: `Ctrl+A`, `[` → Pfeiltasten → `q` zum Beenden
-
-#### 6. Parallel-Key Modus implementiert ✅
-- Neue Datei: `bot/observation/sources/solana_parallel_source.py`
-- `wallet_analysis.py` angepasst: Modus [3] beim Source-Start
-- Beim Start wählbar: Anzahl parallele Keys (1 bis max verfügbare Keys)
-- Wallets gleichmäßig auf Keys aufgeteilt (kein Overlap)
-- Dynamisches Rebalancing wenn ein Key erschöpft ist
-- Fallback auf Public RPCs wenn alle Keys erschöpft
-
-#### 7. Candidate-Pool auf 100 erweitert + Smart Selection ✅
-- `find_wallets.py`: `MAX_CANDIDATES = 100` (vorher 20)
-- `wallets/sync.py`: komplett überarbeitet
-  - Candidates werden nach Observer-Trade-Anzahl sortiert (meiste zuerst)
-  - Multi-Key / Polling: Top 20 Candidates werden beobachtet
-  - Parallel N Keys: Top 20×N Candidates werden beobachtet
-  - Ziel: vielversprechendste Candidates schnellstmöglich zur 20-Trade-Grenze bringen
-- `wallet_analysis.py`: Startreihenfolge geändert
-  - Config wird ZUERST abgefragt (Key-Anzahl wird benötigt)
-  - DANN `sync_wallets(num_parallel_keys)` aufgerufen
-  - Zusammenfassung zeigt jetzt an wie viele Candidates aktiv beobachtet werden
+### wallet_tracker.py
+- Neue DB-Felder: `cost_eur`, `effective_pnl_eur` in `wallet_trades`
+- Neue Stats-Felder: `total_cost_eur`, `effective_pnl_eur` in `wallet_stats`
+- `record_buy` + `record_sell` akzeptieren `cost_eur` / `entry_cost_eur`
 
 ---
 
 ## Aktueller Projektstand
 
 ### Infrastruktur
-- **Server:** Kali Linux (`Shrimps-Kali`), User `copybot`
-  - Lokal: `192.168.178.55`
-  - Tailscale: `100.93.6.111`
-- **Bot:** 24/7 in `screen -S copybot`, aktuell keine aktive Session
-- **Live Log:** `screen -S livelog -h 5000` (Terminal-Modus, stündlich)
+- **Server:** Kali Linux (`Shrimps-Kali`), `copybot@192.168.178.55` / Tailscale `100.93.6.111`
+- **Bot:** läuft 24/7 in `screen -S copybot`
+- **Live Log:** `screen -S livelog -h 5000`
 
 ### Screen-Befehle
 ```bash
-screen -S copybot                              # Bot-Screen
-screen -S livelog -h 5000                      # Live Log mit Scrollback
-screen -ls                                     # Alle Sessions
-screen -r copybot / screen -r livelog          # Wiederverbinden
-# Ctrl+A, D → detach | Ctrl+A, [ → Scroll-Modus | q → Scroll beenden
+screen -S copybot                    # Bot
+screen -S livelog -h 5000            # Live Log mit Scrollback
+screen -ls                           # Alle Sessions
+screen -r copybot                    # Reconnect
+screen -d <id> && screen -r <id>     # Force reconnect
+# Ctrl+A, D → detach | Ctrl+A, [ → Scroll | q → Ende
 ```
 
 ### Git-Workflow
@@ -83,82 +80,79 @@ Server:     git -C ~/copybot pull
 DBs:        python deploy.py sync
 ```
 
-### Trade-Source Modi (beim Start wählbar)
+### Trade-Source Modi
 ```
-[1] Multi-Key     – sequenzielle Helius Key-Rotation → Top 20 Candidates
-[2] Polling       – einzelner Helius Key             → Top 20 Candidates
-[3] Parallel-Key  – N Keys gleichzeitig              → Top 20×N Candidates
-                    Beim Start: Anzahl Keys eingeben (1 bis max verfügbar)
+[1] Multi-Key     → Top 20 Candidates
+[2] Polling       → Top 20 Candidates
+[3] Parallel N    → Top 20×N Candidates
 ```
 
-### Candidate-System
-```
-Pool:        100 Candidates in axiom_wallets (find_wallets.py --apply)
-Beobachtet:  Top N nach Observer-Trades (meiste Trades = nächste zur Grenze)
-Grenze:      20 saubere SELLs → evaluate_wallets → Active oder Archived
-Auffüllen:   python find_wallets.py --apply  (fügt bis zu 20 neue hinzu)
+### Wichtige Commands
+```bash
+python main.py wallet_analysis       # Bot starten
+python main.py list                  # Wallet Übersicht (Browser)
+python main.py list --analysis       # Analysis-DB Übersicht
+python main.py logs                  # Session-Übersicht
+python main.py keys                  # Helius Keys verwalten
+python main.py live_log              # Live Log
+python recalc_confidence.py          # Confidence Scores neu berechnen
+python find_wallets.py --apply       # Candidate-Pool auffüllen
+python deploy.py sync                # DBs synchronisieren
 ```
 
 ### Helius Keys
-- 7 Keys konfiguriert in `config/network.py`
-- Key 1 leer, Keys 2–7 aktiv (6 aktive Keys)
-- Parallel-Modus: bis zu 6 Keys gleichzeitig → bis zu 120 Candidates gleichzeitig
-
-### Bot-Modi
-- **Observer Mode** (`observer_` prefix): Folgt Wallets 1:1, kein SL/TP
-- **Analysis Mode** (`analysis_` prefix): Eigener SL/TP (-50% / +100% default)
+- 7 Keys, Key 1 leer, Keys 2–7 aktiv (6 aktive)
+- Parallel mit 2 Keys → Top 40 Candidates
 
 ### Performance (letzte bekannte Sessions)
-- `observer_20260425_210731`: 26h, 44 Trades, **-1842 EUR**
-- `observer_20260426_233400`: positiv trending
-- Beste Session: **+167.579 EUR** (März 2026)
+- `observer_20260502_163339`: ~20h, 209 Trades, PnL +3.028 EUR (paper)
+- `observer_20260506_084046`: ~10h, 46 Trades, +184.485 EUR (Ausreißer: DNFdBy3b +185K)
+- Beste echte Session: **+167.579 EUR** (März 2026)
 
 ### Offene Punkte
-- Alles aus diesem Chat deployen: `git push` → `git pull` auf Server
-- Parallel-Modus + neues Candidate-System testen (erste Session)
-- Laptop-Workflow via Tailscale testen (morgen Schule)
-- Live Log weiter verfeinern nach Bedarf
+- `recalc_confidence.py` auf Server ausführen (nach git pull)
+- Analysis-Session starten und mit Cost Model testen
+- wallet_list.py: `effective_pnl_eur` aus Analysis-DB anzeigen
+- Stagnation-Timeout von 15 auf 30 Min erhöhen (noch offen)
+- Laptop-Workflow via Tailscale testen
 - Dashboard: Freund baut auf API-Basis (Port 8080)
+- copybotfx Pfad in Claude in Chrome Extension eintragen
 
 ---
 
 ## Wichtige Dateipfade
 ```
 copybot/
-├── deploy.py
-├── .devices.json                        # Geräte mit IPs (lokal, nicht Git)
-├── devices.template.json
-├── WORKFLOW.md
 ├── snapshot/
-│   ├── CLAUDE_SETUP.md                 # Claude Filesystem-Zugriff Anleitung
-│   └── SNAPSHOT_Copybot_6.md           # Dieser Snapshot
+│   ├── CLAUDE_SETUP.md              # Claude Filesystem-Zugriff (copybot + daphna)
+│   ├── CLAUDE_SETUP_FX.md           # Setup für copybotfx Chat
+│   └── SNAPSHOT_Copybot_6.md        # Dieser Snapshot
 └── bot/
     ├── main.py
-    ├── find_wallets.py                  # MAX_CANDIDATES = 100
-    ├── config/network.py               # 7 Helius Keys
-    ├── wallets/
-    │   ├── sync.py                     # Smart Candidate Selection (NEU)
-    │   └── repository.py
+    ├── find_wallets.py              # MAX_CANDIDATES = 100
+    ├── recalc_confidence.py         # Einmalige Score-Neuberechnung
+    ├── config/network.py            # 7 Helius Keys
+    ├── wallets/sync.py              # Smart Candidate Selection
+    ├── trading/
+    │   ├── wallet_tracker.py        # + cost_eur, effective_pnl_eur
+    │   ├── cost_model.py            # Transaction Cost Model (NEU)
+    │   └── price_oracle.py
     ├── runners/
-    │   ├── wallet_analysis.py          # Config-first + 3 Source-Modi
+    │   ├── wallet_analysis.py       # Analysis mit Kosten + Observer-SL/TP
+    │   ├── wallet_list.py           # HTML Übersicht + Ausschluss + Breakdown
     │   ├── live_log.py
     │   ├── logs.py
     │   └── keys.py
     ├── observation/sources/
-    │   ├── solana_ws_source.py         # Multi-Key Rotation (Modus 1)
-    │   ├── solana_polling.py           # Einzelner Key (Modus 2)
-    │   └── solana_parallel_source.py   # Parallel-Key (Modus 3, NEU)
-    ├── trading/
-    │   ├── wallet_tracker.py
-    │   └── price_oracle.py
+    │   ├── solana_ws_source.py      # Modus 1
+    │   ├── solana_polling.py        # Modus 2
+    │   └── solana_parallel_source.py # Modus 3 (Bug gefixt)
     └── data/
         ├── observer_performance.db
-        └── wallet_performance.db
+        ├── wallet_performance.db
+        └── excluded_trades.json     # Ausgeschlossene Trades
 ```
-
----
 
 ## Repo
 - GitHub: `https://github.com/0xphx/copybot.git` (privat)
 - Server: `~/copybot` via git clone
-- Nächster Schritt: `git push` vom PC → `git pull` auf Server

@@ -14,38 +14,6 @@ logger = logging.getLogger(__name__)
 
 DB_PATH = "data/wallet_performance.db"
 
-
-@dataclass
-class WalletTrade:
-    """Ein Trade eines einzelnen Wallets"""
-    wallet: str
-    token: str
-    side: str          # BUY / SELL
-    amount: float
-    price_eur: float
-    value_eur: float
-    pnl_eur: Optional[float]
-    pnl_percent: Optional[float]
-    timestamp: datetime
-    session_id: str
-    price_missing: bool = False  # True wenn Preis nicht abrufbar war
-
-
-@dataclass
-class WalletStats:
-    """Statistiken eines Wallets"""
-    wallet: str
-    total_trades: int
-    winning_trades: int
-    losing_trades: int
-    total_pnl_eur: float
-    avg_pnl_eur: float
-    win_rate: float
-    confidence_score: float   # 0.0 - 1.0
-    last_updated: datetime
-
-
-# Strategie-spezifische SL/TP Fallback-Werte
 STRATEGY_SL_TP_DEFAULTS = {
     'ASYMMETRIC':  (-35.0, 150.0),
     'RUNNER':      (-50.0, 175.0),
@@ -60,6 +28,36 @@ GLOBAL_TP_DEFAULT = 100.0
 POSITION_SIZE_EUR = 200.0
 
 
+@dataclass
+class WalletTrade:
+    wallet: str
+    token: str
+    side: str
+    amount: float
+    price_eur: float
+    value_eur: float
+    pnl_eur: Optional[float]
+    pnl_percent: Optional[float]
+    timestamp: datetime
+    session_id: str
+    price_missing: bool = False
+    cost_eur: float = 0.0
+    effective_pnl_eur: Optional[float] = None
+
+
+@dataclass
+class WalletStats:
+    wallet: str
+    total_trades: int
+    winning_trades: int
+    losing_trades: int
+    total_pnl_eur: float
+    avg_pnl_eur: float
+    win_rate: float
+    confidence_score: float
+    last_updated: datetime
+
+
 class WalletTracker:
     """
     Verwaltet die Performance-Datenbank fuer Wallets.
@@ -67,30 +65,13 @@ class WalletTracker:
     Confidence Score:
         score = (WinRate × 0.55 + AvgPnL_norm × 0.45) × trade_factor
 
-        - WinRate:      Anteil profitabler Trades (0.0 - 1.0), Gewicht 55%
-        - AvgPnL_norm:  tanh(avg_pnl_eur / 50), normalisiert auf 0-1, Gewicht 45%
-                        Negative AvgPnL -> 0 (kein Malus, aber auch kein Bonus)
-        - trade_factor: min(n / 100, 1.0) -> lineare Daempfung bis 100 Trades
-                        Unter 100 Trades ist der Score proportional gedaempft.
-        - Minimum 5 Trades fuer echten Score, sonst 0.0 (unbekannt)
+        - WinRate:      Anteil profitabler Trades (0.0-1.0), Gewicht 55%
+        - AvgPnL_norm:  tanh(avg_pnl_eur / 50), normalisiert 0-1, Gewicht 45%
+        - trade_factor: min(n / 100, 1.0) – lineare Daempfung bis 100 Trades
+        - Minimum 5 Trades fuer echten Score, sonst 0.0
 
-    Strategie-Label (ab 20 sauberen Trades):
-        ASYMMETRIC  - grosse Gewinne, begrenzte Verluste
-        RUNNER      - laesst Gewinne laufen, akzeptiert hohe Verluste
-        SCALPER     - konstante kleine Gewinne, enge Verluste
-        LOSS_MAKER  - ueberwiegend Verluste
-        MIXED       - kein klares Muster
-        UNKNOWN     - unter 20 saubere Trades
-
-    Dynamisches SL/TP (ab 20 sauberen Trades mit High/Low Daten):
-        TP = 25. Perzentil der Gewinn-Exits
-        SL = 75. Perzentil der Trade-Lows (max. Drawdown der sich erholt hat)
-
-        Prioritaet SL/TP:
-        1. Dynamische Werte aus Analysis-DB
-        2. Aus Observer-DB berechnet (wenn observer_db_path gesetzt)
-        3. Label-basierte Defaults
-        4. Globale Defaults (-50% / +100%)
+    Im Analysis-Modus werden Transaktionskosten (cost_model.py) berechnet
+    und als effective_pnl_eur separat gespeichert.
     """
 
     MIN_TRADES_FOR_SCORE          = 5
@@ -119,31 +100,35 @@ class WalletTracker:
 
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS wallet_trades (
-                id              INTEGER PRIMARY KEY AUTOINCREMENT,
-                session_id      TEXT NOT NULL,
-                wallet          TEXT NOT NULL,
-                token           TEXT NOT NULL,
-                side            TEXT NOT NULL,
-                amount          REAL NOT NULL,
-                price_eur       REAL NOT NULL,
-                value_eur       REAL NOT NULL,
-                pnl_eur         REAL,
-                pnl_percent     REAL,
-                price_missing   INTEGER DEFAULT 0,
-                max_price_pct   REAL,
-                min_price_pct   REAL,
-                reason          TEXT,
-                timestamp       TEXT NOT NULL
+                id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id          TEXT NOT NULL,
+                wallet              TEXT NOT NULL,
+                token               TEXT NOT NULL,
+                side                TEXT NOT NULL,
+                amount              REAL NOT NULL,
+                price_eur           REAL NOT NULL,
+                value_eur           REAL NOT NULL,
+                pnl_eur             REAL,
+                pnl_percent         REAL,
+                price_missing       INTEGER DEFAULT 0,
+                max_price_pct       REAL,
+                min_price_pct       REAL,
+                reason              TEXT,
+                cost_eur            REAL DEFAULT 0.0,
+                effective_pnl_eur   REAL,
+                timestamp           TEXT NOT NULL
             )
         """)
 
         cursor.execute("PRAGMA table_info(wallet_trades)")
         trade_cols = [row['name'] for row in cursor.fetchall()]
         for col, typedef in [
-            ('price_missing', 'INTEGER DEFAULT 0'),
-            ('max_price_pct', 'REAL'),
-            ('min_price_pct', 'REAL'),
-            ('reason',        'TEXT'),
+            ('price_missing',     'INTEGER DEFAULT 0'),
+            ('max_price_pct',     'REAL'),
+            ('min_price_pct',     'REAL'),
+            ('reason',            'TEXT'),
+            ('cost_eur',          'REAL DEFAULT 0.0'),
+            ('effective_pnl_eur', 'REAL'),
         ]:
             if col not in trade_cols:
                 cursor.execute(f"ALTER TABLE wallet_trades ADD COLUMN {col} {typedef}")
@@ -162,6 +147,8 @@ class WalletTracker:
                 strategy_label      TEXT DEFAULT 'UNKNOWN',
                 dynamic_sl          REAL,
                 dynamic_tp          REAL,
+                total_cost_eur      REAL DEFAULT 0.0,
+                effective_pnl_eur   REAL DEFAULT 0.0,
                 last_updated        TEXT NOT NULL
             )
         """)
@@ -169,9 +156,11 @@ class WalletTracker:
         cursor.execute("PRAGMA table_info(wallet_stats)")
         stat_cols = [row['name'] for row in cursor.fetchall()]
         for col, typedef in [
-            ('strategy_label', "TEXT DEFAULT 'UNKNOWN'"),
-            ('dynamic_sl',     'REAL'),
-            ('dynamic_tp',     'REAL'),
+            ('strategy_label',    "TEXT DEFAULT 'UNKNOWN'"),
+            ('dynamic_sl',        'REAL'),
+            ('dynamic_tp',        'REAL'),
+            ('total_cost_eur',    'REAL DEFAULT 0.0'),
+            ('effective_pnl_eur', 'REAL DEFAULT 0.0'),
         ]:
             if col not in stat_cols:
                 cursor.execute(f"ALTER TABLE wallet_stats ADD COLUMN {col} {typedef}")
@@ -192,19 +181,21 @@ class WalletTracker:
         conn.close()
         logger.info("[WalletTracker] Database initialized")
 
-    # -----------------------------------------------------------------------
+    # ──────────────────────────────────────────────────────────────────
     # TRADE RECORDING
-    # -----------------------------------------------------------------------
+    # ──────────────────────────────────────────────────────────────────
 
     def record_buy(self, session_id: str, wallet: str, token: str,
-                   amount: float, price_eur: float) -> int:
+                   amount: float, price_eur: float,
+                   cost_eur: float = 0.0) -> int:
         conn = self._connect()
         cursor = conn.cursor()
         cursor.execute("""
             INSERT INTO wallet_trades
-            (session_id, wallet, token, side, amount, price_eur, value_eur, timestamp)
-            VALUES (?, ?, ?, 'BUY', ?, ?, ?, ?)
-        """, (session_id, wallet, token, amount, price_eur, amount * price_eur, datetime.now().isoformat()))
+            (session_id, wallet, token, side, amount, price_eur, value_eur, cost_eur, timestamp)
+            VALUES (?, ?, ?, 'BUY', ?, ?, ?, ?, ?)
+        """, (session_id, wallet, token, amount, price_eur,
+              amount * price_eur, cost_eur, datetime.now().isoformat()))
         trade_id = cursor.lastrowid
         conn.commit()
         conn.close()
@@ -212,36 +203,50 @@ class WalletTracker:
 
     def record_sell(self, session_id: str, wallet: str, token: str,
                     amount: float, price_eur: float, entry_price_eur: float,
-                    price_missing: bool = False, max_price_pct: Optional[float] = None,
-                    min_price_pct: Optional[float] = None, reason: Optional[str] = None) -> None:
+                    price_missing: bool = False,
+                    max_price_pct: Optional[float] = None,
+                    min_price_pct: Optional[float] = None,
+                    reason: Optional[str] = None,
+                    cost_eur: float = 0.0,
+                    entry_cost_eur: float = 0.0) -> None:
+        """
+        cost_eur:       Kosten dieses SELL-Trades
+        entry_cost_eur: Kosten des zugehoerigen BUY-Trades (fuer effective_pnl)
+        """
         pnl_eur     = (price_eur - entry_price_eur) * amount
         pnl_percent = ((price_eur - entry_price_eur) / entry_price_eur * 100) if entry_price_eur > 0 else 0
+
+        # Effektiver PnL nach Kosten (BUY + SELL Kosten abziehen)
+        total_trade_cost  = cost_eur + entry_cost_eur
+        effective_pnl_eur = pnl_eur - total_trade_cost
 
         conn = self._connect()
         cursor = conn.cursor()
         cursor.execute("""
             INSERT INTO wallet_trades
             (session_id, wallet, token, side, amount, price_eur, value_eur,
-             pnl_eur, pnl_percent, price_missing, max_price_pct, min_price_pct, reason, timestamp)
-            VALUES (?, ?, ?, 'SELL', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             pnl_eur, pnl_percent, price_missing, max_price_pct, min_price_pct,
+             reason, cost_eur, effective_pnl_eur, timestamp)
+            VALUES (?, ?, ?, 'SELL', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (session_id, wallet, token, amount, price_eur, amount * price_eur,
               pnl_eur, pnl_percent, 1 if price_missing else 0,
-              max_price_pct, min_price_pct, reason, datetime.now().isoformat()))
+              max_price_pct, min_price_pct, reason,
+              cost_eur, effective_pnl_eur, datetime.now().isoformat()))
         conn.commit()
         conn.close()
         self._recalculate_stats(wallet)
 
-    # -----------------------------------------------------------------------
+    # ──────────────────────────────────────────────────────────────────
     # STATS & CONFIDENCE
-    # -----------------------------------------------------------------------
+    # ──────────────────────────────────────────────────────────────────
 
     def _recalculate_stats(self, wallet: str):
-        """Berechnet Stats, Confidence Score, Label und dynamisches SL/TP neu."""
         conn = self._connect()
         cursor = conn.cursor()
 
         cursor.execute("""
-            SELECT pnl_eur, pnl_percent, max_price_pct, min_price_pct
+            SELECT pnl_eur, pnl_percent, max_price_pct, min_price_pct,
+                   cost_eur, effective_pnl_eur
             FROM wallet_trades
             WHERE wallet = ? AND side = 'SELL' AND pnl_eur IS NOT NULL
               AND (reason IS NULL OR reason NOT IN ('SESSION_ENDED', 'CRASH_RECOVERY'))
@@ -253,8 +258,9 @@ class WalletTracker:
                 INSERT INTO wallet_stats
                     (wallet, total_trades, winning_trades, losing_trades,
                      total_pnl_eur, avg_pnl_eur, win_rate, confidence_score,
-                     strategy_label, dynamic_sl, dynamic_tp, last_updated)
-                VALUES (?, 0, 0, 0, 0.0, 0.0, 0.0, 0.0, 'UNKNOWN', NULL, NULL, ?)
+                     strategy_label, dynamic_sl, dynamic_tp,
+                     total_cost_eur, effective_pnl_eur, last_updated)
+                VALUES (?, 0, 0, 0, 0.0, 0.0, 0.0, 0.0, 'UNKNOWN', NULL, NULL, 0.0, 0.0, ?)
                 ON CONFLICT(wallet) DO NOTHING
             """, (wallet, datetime.now().isoformat()))
             conn.commit()
@@ -265,18 +271,13 @@ class WalletTracker:
         winning      = [r for r in rows if r['pnl_eur'] > 0]
         losing       = [r for r in rows if r['pnl_eur'] <= 0]
 
-        total_pnl = sum(r['pnl_eur'] for r in rows)
-        avg_pnl   = total_pnl / total_trades
-        win_rate  = len(winning) / total_trades
+        total_pnl    = sum(r['pnl_eur'] for r in rows)
+        avg_pnl      = total_pnl / total_trades
+        win_rate     = len(winning) / total_trades
+        total_cost   = sum(r['cost_eur'] or 0 for r in rows)
+        eff_pnl      = sum(r['effective_pnl_eur'] or r['pnl_eur'] for r in rows)
 
-        # ── Confidence Score ───────────────────────────────────────────────
-        # Formel: (WinRate × 0.55 + AvgPnL_norm × 0.45) × trade_factor
-        #
-        # WinRate:      Anteil profitabler Trades, Gewicht 55%
-        # AvgPnL_norm:  tanh(avg_pnl_eur / 50) → robust gegen Ausreisser,
-        #               sättigt sanft, negative Werte → 0
-        # trade_factor: min(n / 100, 1.0) → lineare Dämpfung bis 100 Trades
-        # ──────────────────────────────────────────────────────────────────
+        # Confidence Score
         if total_trades < self.MIN_TRADES_FOR_SCORE:
             confidence = 0.0
         else:
@@ -299,8 +300,9 @@ class WalletTracker:
             INSERT INTO wallet_stats
                 (wallet, total_trades, winning_trades, losing_trades,
                  total_pnl_eur, avg_pnl_eur, win_rate, confidence_score,
-                 strategy_label, dynamic_sl, dynamic_tp, last_updated)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 strategy_label, dynamic_sl, dynamic_tp,
+                 total_cost_eur, effective_pnl_eur, last_updated)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(wallet) DO UPDATE SET
                 total_trades     = excluded.total_trades,
                 winning_trades   = excluded.winning_trades,
@@ -312,18 +314,21 @@ class WalletTracker:
                 strategy_label   = excluded.strategy_label,
                 dynamic_sl       = excluded.dynamic_sl,
                 dynamic_tp       = excluded.dynamic_tp,
+                total_cost_eur   = excluded.total_cost_eur,
+                effective_pnl_eur= excluded.effective_pnl_eur,
                 last_updated     = excluded.last_updated
         """, (wallet, total_trades, len(winning), len(losing),
               total_pnl, avg_pnl, win_rate, confidence,
-              strategy_label, dynamic_sl, dynamic_tp, datetime.now().isoformat()))
+              strategy_label, dynamic_sl, dynamic_tp,
+              total_cost, eff_pnl, datetime.now().isoformat()))
 
         conn.commit()
         conn.close()
 
         logger.debug(
             f"[WalletTracker] {wallet[:8]}... -> "
-            f"conf={confidence:.4f} | wr={win_rate:.0%} | trades={total_trades} | "
-            f"avg_pnl={avg_pnl:+.2f} EUR | label={strategy_label}"
+            f"conf={confidence:.4f} | wr={win_rate:.0%} | n={total_trades} | "
+            f"pnl={avg_pnl:+.2f} EUR | eff_pnl={eff_pnl:+.2f} EUR | label={strategy_label}"
         )
 
     def _calculate_strategy_label(self, wallet: str, conn) -> str:
@@ -341,15 +346,15 @@ class WalletTracker:
         if len(trades) < self.MIN_TRADES_FOR_LABEL:
             return 'UNKNOWN'
 
-        pcts  = [t['pnl_percent'] for t in trades]
-        wins  = [p for p in pcts if p > 0]
+        pcts   = [t['pnl_percent'] for t in trades]
+        wins   = [p for p in pcts if p > 0]
         losses = [p for p in pcts if p < 0]
 
-        win_rate     = len(wins) / len(pcts)
-        avg_win      = statistics.mean(wins)   if wins   else 0.0
-        avg_loss     = statistics.mean(losses) if losses else 0.0
-        gross_profit = sum(t['pnl_eur'] for t in trades if t['pnl_eur'] > 0)
-        gross_loss   = abs(sum(t['pnl_eur'] for t in trades if t['pnl_eur'] < 0))
+        win_rate      = len(wins) / len(pcts)
+        avg_win       = statistics.mean(wins)   if wins   else 0.0
+        avg_loss      = statistics.mean(losses) if losses else 0.0
+        gross_profit  = sum(t['pnl_eur'] for t in trades if t['pnl_eur'] > 0)
+        gross_loss    = abs(sum(t['pnl_eur'] for t in trades if t['pnl_eur'] < 0))
         profit_factor = gross_profit / gross_loss if gross_loss > 0 else 999.0
 
         lows_available  = [t['min_price_pct'] for t in trades if t['min_price_pct'] is not None]
@@ -362,15 +367,10 @@ class WalletTracker:
         elif avg_win > 80 and abs(avg_loss) < 45 and profit_factor >= 1.0:
             label = 'ASYMMETRIC'
         elif avg_win > 60 and abs(avg_loss) >= 35:
-            if lows_available and highs_available:
-                label = 'RUNNER' if (median_high > avg_win * 0.8 and abs(median_drawdown) > 30) else 'MIXED'
-            else:
-                label = 'RUNNER'
+            label = 'RUNNER' if (lows_available and highs_available and
+                                  median_high > avg_win * 0.8 and abs(median_drawdown) > 30) else 'MIXED'
         elif avg_win <= 50 and abs(avg_loss) <= 25 and win_rate >= 0.50:
-            if lows_available:
-                label = 'SCALPER' if abs(median_drawdown) <= 35 else 'MIXED'
-            else:
-                label = 'SCALPER'
+            label = 'SCALPER' if (lows_available and abs(median_drawdown) <= 35) else 'MIXED'
         else:
             label = 'MIXED'
 
@@ -414,9 +414,9 @@ class WalletTracker:
 
         return (dynamic_sl, dynamic_tp)
 
-    # -----------------------------------------------------------------------
+    # ──────────────────────────────────────────────────────────────────
     # SL/TP GETTER
-    # -----------------------------------------------------------------------
+    # ──────────────────────────────────────────────────────────────────
 
     def get_sl_tp_for_wallet(self, wallet: str) -> tuple:
         conn = self._connect()
@@ -508,7 +508,8 @@ class WalletTracker:
         conn = self._connect()
         cursor = conn.cursor()
         cursor.execute("""
-            SELECT b.id, b.session_id, b.wallet, b.token, b.amount, b.price_eur, b.timestamp
+            SELECT b.id, b.session_id, b.wallet, b.token, b.amount, b.price_eur,
+                   b.cost_eur, b.timestamp
             FROM wallet_trades b
             WHERE b.side = 'BUY'
               AND NOT EXISTS (
@@ -523,11 +524,13 @@ class WalletTracker:
         return [dict(r) for r in rows]
 
     def close_orphaned_buy(self, buy_id: int, wallet: str, token: str,
-                           amount: float, entry_price_eur: float, session_id: str) -> None:
+                           amount: float, entry_price_eur: float,
+                           session_id: str, cost_eur: float = 0.0) -> None:
         self.record_sell(
             session_id=session_id, wallet=wallet, token=token,
             amount=amount, price_eur=0.0, entry_price_eur=entry_price_eur,
             price_missing=True, reason='CRASH_RECOVERY',
+            cost_eur=0.0, entry_cost_eur=cost_eur,
         )
         logger.info(f"[WalletTracker] CRASH_RECOVERY: {wallet[:8]}... buy_id={buy_id} -> closed as price_missing")
 
@@ -599,9 +602,9 @@ class WalletTracker:
         conn.close()
         return [dict(r) for r in rows]
 
-    # -----------------------------------------------------------------------
+    # ──────────────────────────────────────────────────────────────────
     # INAKTIVITAETS-TAG SYSTEM
-    # -----------------------------------------------------------------------
+    # ──────────────────────────────────────────────────────────────────
 
     INACTIVITY_TIMEOUT_DEFAULT   = 600
     INACTIVITY_TIMEOUT_PENALIZED = 300
