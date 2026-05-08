@@ -10,6 +10,11 @@ Zwei Modi:
     als effective_pnl separat gespeichert.
     Zeigt: raw PnL + effective PnL nach Kosten.
 
+    BUY-Signal Filter (beim Start konfigurierbar):
+    - Min. X Wallets muessen denselben Token innerhalb von Y Sekunden kaufen
+    - Gesamt-Confidence aller kaufenden Wallets >= Z
+    - Verhindert Einzelausreisser und erzwingt Redundanz
+
 [2] OBSERVER MODE
     Folgt Wallet 1:1, kein SL/TP.
     Timeouts: Stagnation (15 Min) + Max-Haltedauer (60 Min).
@@ -21,9 +26,11 @@ import aiohttp
 import signal
 import sys
 import logging
+import time
+from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 from dataclasses import dataclass, field
 
 from config.network import (
@@ -51,11 +58,11 @@ MAX_PRICE_FAILURES     = 5
 class WalletPosition:
     wallet:          str
     token:           str
-    entry_price_eur: float      # Spot-Preis bei Kauf
-    entry_price_eff: float      # Effektiver Preis nach Kosten
+    entry_price_eur: float
+    entry_price_eff: float
     amount:          float
-    cost_eur:        float      # Position in EUR
-    entry_cost_eur:  float      # Transaktionskosten BUY
+    cost_eur:        float
+    entry_cost_eur:  float
     entry_time:      datetime
 
 
@@ -104,14 +111,13 @@ class WalletAccount:
             if invest < 0.01:
                 return None
 
-        # Transaktionskosten BUY
-        entry_cost_eur = 0.0
+        entry_cost_eur  = 0.0
         entry_price_eff = price_eur
         if cost_model and not observer_mode:
             entry_price_eff, buy_cost = cost_model.effective_buy_price(price_eur, invest)
             entry_cost_eur = buy_cost.total_cost_eur
 
-        amount = invest / price_eur  # Amount basiert auf Spot-Preis
+        amount = invest / price_eur
         pos = WalletPosition(
             wallet=self.wallet, token=token,
             entry_price_eur=price_eur,
@@ -144,20 +150,17 @@ class WalletAccount:
         if pos is None:
             return None
 
-        # Transaktionskosten SELL
-        sell_cost_eur = 0.0
+        sell_cost_eur  = 0.0
         exit_price_eff = price_eur
         if cost_model and not price_missing:
             exit_price_eff, sell_cost = cost_model.effective_sell_price(price_eur, pos.cost_eur)
             sell_cost_eur = sell_cost.total_cost_eur
 
-        sell_value = pos.amount * price_eur
-        pnl_eur    = (price_eur - pos.entry_price_eur) * pos.amount
-        pnl_pct    = ((price_eur - pos.entry_price_eur) / pos.entry_price_eur * 100) if pos.entry_price_eur > 0 else 0
-
-        # Effektiver PnL nach allen Kosten
-        total_cost       = pos.entry_cost_eur + sell_cost_eur
-        effective_pnl    = pnl_eur - total_cost
+        sell_value        = pos.amount * price_eur
+        pnl_eur           = (price_eur - pos.entry_price_eur) * pos.amount
+        pnl_pct           = ((price_eur - pos.entry_price_eur) / pos.entry_price_eur * 100) if pos.entry_price_eur > 0 else 0
+        total_cost        = pos.entry_cost_eur + sell_cost_eur
+        effective_pnl     = pnl_eur - total_cost
         effective_pnl_pct = (effective_pnl / pos.cost_eur * 100) if pos.cost_eur > 0 else 0
 
         self.cash += sell_value
@@ -219,7 +222,6 @@ class WalletAnalysisRunner:
         self.observer_stagnation_tracker: Dict[tuple, tuple] = {}
         self.observer_max_hold_minutes = self.OBSERVER_MAX_HOLD_MINUTES_DEFAULT
 
-        # Stores entry_cost_eur per position key for record_sell
         self._entry_costs: Dict[tuple, float] = {}
 
         self.active_token:   Optional[str]           = None
@@ -231,6 +233,13 @@ class WalletAnalysisRunner:
         self.start_time: Optional[datetime] = None
         self.total_buys  = 0
         self.total_sells = 0
+
+        # BUY-Signal Filter (Analysis-Modus)
+        # {token: [(wallet, timestamp, confidence), ...]}
+        self._buy_signals: Dict[str, List] = defaultdict(list)
+        self.min_wallets_for_buy:   int   = 1     # Mindestanzahl Wallets die kaufen muessen
+        self.buy_signal_window_sec: int   = 60    # Zeitfenster in Sekunden
+        self.min_confidence_sum:    float = 0.0   # Mindest-Summe Confidence aller kaufenden Wallets
 
     # ──────────────────────────────────────────────────────────────────
     # STARTUP
@@ -264,17 +273,13 @@ class WalletAnalysisRunner:
             observer_db_path=obs_path,
         )
 
-        # Cost Model nur im Analysis-Modus
         if not self.observer_mode:
             self.cost_model = TransactionCostModel()
-            print(f" Transaction Cost Model aktiv:")
-            print(f"   Pool-Liquiditaet: ~{self.cost_model.pool_liquidity_eur:,.0f} EUR (Default)")
-            print(f"   Swap-Fee:          {self.cost_model.swap_fee_rate*100:.2f}% pro Seite")
-            print(f"   Market Drift:      {self.cost_model.market_drift_rate*100:.2f}%")
-            print(f"   Failure Rate:      {self.cost_model.tx_failure_rate*100:.0f}%")
             sample_cost = self.cost_model.calculate(CAPITAL_PER_WALLET_EUR * POSITION_SIZE_PERCENT)
-            print(f"   Kosten/Seite:     ~{sample_cost.total_cost_rate*100:.2f}% ({sample_cost.total_cost_eur:.4f} EUR)")
-            print(f"   Round-Trip:       ~{self.cost_model.round_trip_cost_rate(CAPITAL_PER_WALLET_EUR * POSITION_SIZE_PERCENT)*100:.2f}%")
+            print(f" Transaction Cost Model:")
+            print(f"   Pool:      ~{self.cost_model.pool_liquidity_eur:,.0f} EUR | "
+                  f"Swap: {self.cost_model.swap_fee_rate*100:.2f}% | "
+                  f"Kosten/Seite: ~{sample_cost.total_cost_rate*100:.2f}%")
             print()
 
         for w in wallet_addresses:
@@ -336,7 +341,7 @@ class WalletAnalysisRunner:
         print("="*70)
         print()
         print(" Modus waehlen:")
-        print("   [1] Analysis Mode  - eigener SL/TP, Transaktionskosten berechnet")
+        print("   [1] Analysis Mode  - eigener SL/TP, Transaktionskosten, BUY-Filter")
         print("   [2] Observer Mode  - folgt Wallet 1:1, kein SL/TP")
         print()
 
@@ -426,6 +431,58 @@ class WalletAnalysisRunner:
                 except ValueError:
                     print("    Bitte eine ganze Zahl eingeben!")
 
+        # BUY-Signal Filter (nur Analysis-Modus)
+        if not self.observer_mode:
+            print()
+            print(" BUY-Signal Filter (Redundanz):")
+            print("   Mindestanzahl Wallets die denselben Token kaufen muessen")
+            print("   + Zeitfenster in dem die Signale eingehen muessen")
+            print("   + Minimale Gesamt-Confidence aller kaufenden Wallets")
+            print()
+
+            while True:
+                inp = input("   Min. Wallets fuer BUY-Signal [1]: ").strip()
+                if not inp:
+                    self.min_wallets_for_buy = 1
+                    break
+                try:
+                    v = int(inp)
+                    if v >= 1:
+                        self.min_wallets_for_buy = v
+                        break
+                    print("    Muss mindestens 1 sein!")
+                except ValueError:
+                    print("    Bitte eine ganze Zahl eingeben!")
+
+            if self.min_wallets_for_buy > 1:
+                while True:
+                    inp = input("   Zeitfenster fuer Redundanz (Sekunden) [60]: ").strip()
+                    if not inp:
+                        self.buy_signal_window_sec = 60
+                        break
+                    try:
+                        v = int(inp)
+                        if v >= 5:
+                            self.buy_signal_window_sec = v
+                            break
+                        print("    Muss mindestens 5 Sekunden sein!")
+                    except ValueError:
+                        print("    Bitte eine ganze Zahl eingeben!")
+
+                while True:
+                    inp = input("   Min. Confidence-Summe aller kaufenden Wallets [0.0]: ").strip()
+                    if not inp:
+                        self.min_confidence_sum = 0.0
+                        break
+                    try:
+                        v = float(inp)
+                        if v >= 0.0:
+                            self.min_confidence_sum = v
+                            break
+                        print("    Muss >= 0.0 sein!")
+                    except ValueError:
+                        print("    Bitte eine Zahl eingeben!")
+
         while True:
             inp = input("  Connection Timeout (Sekunden) [30]: ").strip()
             if not inp:
@@ -452,9 +509,15 @@ class WalletAnalysisRunner:
             print("  ANALYSIS MODE")
             print(f"   Positionen:         bis zu {self.max_positions} gleichzeitig")
             print(f"   Kapital:            {CAPITAL_PER_WALLET_EUR:.0f} EUR  ({POSITION_SIZE_PERCENT*100:.0f}% = {CAPITAL_PER_WALLET_EUR*POSITION_SIZE_PERCENT:.0f} EUR/Trade)")
-            print(f"   Stop-Loss:          {self.STOP_LOSS_PERCENT:.0f}%   (aus Observer-DB wenn vorhanden)")
-            print(f"   Take-Profit:       +{self.TAKE_PROFIT_PERCENT:.0f}%  (aus Observer-DB wenn vorhanden)")
-            print(f"   Transaktionskosten: aktiviert (cost_model.py)")
+            print(f"   Stop-Loss:          aus Observer-DB (Fallback: {self.STOP_LOSS_PERCENT:.0f}%)")
+            print(f"   Take-Profit:        aus Observer-DB (Fallback: +{self.TAKE_PROFIT_PERCENT:.0f}%)")
+            print(f"   Transaktionskosten: aktiviert")
+            if self.min_wallets_for_buy > 1:
+                print(f"   BUY-Filter:         >= {self.min_wallets_for_buy} Wallets | "
+                      f"{self.buy_signal_window_sec}s Fenster | "
+                      f"Conf-Summe >= {self.min_confidence_sum:.1f}")
+            else:
+                print(f"   BUY-Filter:         1 Wallet reicht (keine Redundanz)")
         print(f"   Connection Timeout: {self.config['failure_threshold']}s")
         src_str = f"Parallel-Key ({self.num_parallel_keys} Keys)" if self.use_parallel else "Multi-Key" if self.use_websocket else "Polling"
         print(f"   Trade-Source:       {src_str}")
@@ -541,11 +604,78 @@ class WalletAnalysisRunner:
         elif trade.side == "SELL":
             await self._handle_sell(account, trade.token)
 
+    # ──────────────────────────────────────────────────────────────────
+    # BUY-SIGNAL FILTER (Redundanz)
+    # ──────────────────────────────────────────────────────────────────
+
+    def _check_buy_signal(self, wallet: str, token: str) -> bool:
+        """
+        Prueft ob das BUY-Signal fuer einen Token die Redundanz-Bedingungen erfuellt:
+        - Min. X Wallets haben denselben Token innerhalb von Y Sekunden gekauft
+        - Gesamt-Confidence aller kaufenden Wallets >= Z
+
+        Gibt True zurueck wenn der Trade ausgefuehrt werden soll.
+        Gibt False zurueck wenn das Signal noch nicht stark genug ist (kein Trade).
+        Im Observer-Modus oder bei min_wallets=1 immer True.
+        """
+        if self.observer_mode or self.min_wallets_for_buy <= 1:
+            return True
+
+        now    = time.monotonic()
+        cutoff = now - self.buy_signal_window_sec
+
+        # Abgelaufene Signale entfernen
+        self._buy_signals[token] = [
+            (w, ts, conf) for w, ts, conf in self._buy_signals[token]
+            if ts >= cutoff
+        ]
+
+        # Aktuelles Signal eintragen
+        confidence = self.tracker.get_confidence(wallet)
+        self._buy_signals[token].append((wallet, now, confidence))
+
+        # Deduplizieren: pro Wallet nur das neueste Signal
+        seen: Dict[str, tuple] = {}
+        for w, ts, conf in self._buy_signals[token]:
+            if w not in seen or ts > seen[w][0]:
+                seen[w] = (ts, conf)
+        self._buy_signals[token] = [(w, ts, conf) for w, (ts, conf) in seen.items()]
+
+        n_wallets  = len(self._buy_signals[token])
+        total_conf = sum(conf for _, _, conf in self._buy_signals[token])
+        names      = ", ".join(w[:8]+"..." for w, _, _ in self._buy_signals[token])
+
+        logger.info(
+            f"[Redundanz] {token[:8]}... | "
+            f"{n_wallets}/{self.min_wallets_for_buy} Wallets | "
+            f"Conf: {total_conf:.2f}/{self.min_confidence_sum:.2f} | [{names}]"
+        )
+
+        if n_wallets < self.min_wallets_for_buy:
+            logger.info(f"[Redundanz] {token[:8]}... WARTE – {self.min_wallets_for_buy - n_wallets} Wallet(s) fehlen noch")
+            return False
+
+        if total_conf < self.min_confidence_sum:
+            logger.info(f"[Redundanz] {token[:8]}... WARTE – Confidence-Summe {total_conf:.2f} < {self.min_confidence_sum:.2f}")
+            return False
+
+        logger.info(f"[Redundanz] {token[:8]}... SIGNAL OK -> BUY ausfuehren")
+        self._buy_signals[token] = []
+        return True
+
+    # ──────────────────────────────────────────────────────────────────
+    # BUY / SELL
+    # ──────────────────────────────────────────────────────────────────
+
     async def _handle_buy(self, account: WalletAccount, token: str):
         if len(self.open_positions) >= self.max_positions:
             return
         key = (token, account.wallet)
         if key in self.open_positions:
+            return
+
+        # BUY-Signal Filter: Redundanz + Confidence pruefen (nur Analysis-Modus)
+        if not self.observer_mode and not self._check_buy_signal(account.wallet, token):
             return
 
         price_eur = await self.oracle.get_price_eur(token)
@@ -559,7 +689,6 @@ class WalletAnalysisRunner:
         if not pos:
             return
 
-        import time
         self.open_positions[key]    = (account, price_eur)
         self.price_fail_counts[key] = 0
         self._entry_costs[key]      = pos.entry_cost_eur
@@ -592,11 +721,10 @@ class WalletAnalysisRunner:
         print(f"Wallet:       {account.wallet[:20]}...")
         print(f"Entry Price:  {price_eur:.8f} EUR")
         if not self.observer_mode and pos.entry_cost_eur > 0:
-            print(f"Eff. Entry:   {pos.entry_price_eff:.8f} EUR  (inkl. {pos.entry_cost_eur:.4f} EUR Kosten)")
-            if sl and tp:
-                print(f"SL/TP:        {sl:.1f}% / +{tp:.1f}%  (aus Observer-DB)")
+            print(f"Eff. Entry:   {pos.entry_price_eff:.8f} EUR  (+{pos.entry_cost_eur:.4f} EUR Kosten)")
+        if sl and tp:
+            print(f"SL/TP:        {sl:.1f}% / +{tp:.1f}%")
         print(f"Invested:     {pos.cost_eur:.2f} EUR")
-        print(f"Amount:       {pos.amount:.4f}")
         print(f"Positionen:   {len(self.open_positions)}/{self.max_positions}")
         print("="*70)
         print()
@@ -646,16 +774,16 @@ class WalletAnalysisRunner:
             if self.tracker.get_inactivity_tags(account.wallet) > 0:
                 self.tracker.remove_inactivity_tag(account.wallet)
 
-        pnl_eur      = record['pnl_eur']
-        pnl_pct      = record['pnl_percent']
-        eff_pnl      = record.get('effective_pnl_eur', pnl_eur)
-        total_cost   = record.get('total_cost_eur', 0.0)
-        result_emoji = "▲" if pnl_eur >= 0 else "▼"
-        missing_tag  = "  [PREIS NICHT VERFUEGBAR – TOTALVERLUST]" if price_missing else ""
+        pnl_eur    = record['pnl_eur']
+        pnl_pct    = record['pnl_percent']
+        eff_pnl    = record.get('effective_pnl_eur', pnl_eur)
+        total_cost = record.get('total_cost_eur', 0.0)
+        emoji      = "▲" if pnl_eur >= 0 else "▼"
+        miss_tag   = "  [PREIS NICHT VERFUEGBAR – TOTALVERLUST]" if price_missing else ""
 
         print()
         print("="*70)
-        print(f"{result_emoji} SELL [{reason}]{missing_tag}")
+        print(f"{emoji} SELL [{reason}]{miss_tag}")
         print("="*70)
         print(f"Token:        {token[:20]}...")
         print(f"Trigger:      {trigger_label}")
@@ -664,8 +792,8 @@ class WalletAnalysisRunner:
         print(f"Exit Price:   {price_eur:.8f} EUR")
         print(f"Raw P&L:      {pnl_eur:+.2f} EUR ({pnl_pct:+.2f}%)")
         if not self.observer_mode and total_cost > 0:
-            print(f"TX-Kosten:   -{total_cost:.4f} EUR  (BUY+SELL)")
-            print(f"Eff. P&L:    {eff_pnl:+.2f} EUR ({record.get('effective_pnl_pct', 0):+.2f}%)")
+            print(f"TX-Kosten:   -{total_cost:.4f} EUR")
+            print(f"Eff. P&L:    {eff_pnl:+.2f} EUR ({record.get('effective_pnl_pct',0):+.2f}%)")
         print(f"Slots:        {len(self.open_positions)}/{self.max_positions}")
         print("="*70)
         print()
@@ -700,7 +828,6 @@ class WalletAnalysisRunner:
             await self._price_update_loop_analysis()
 
     async def _price_update_loop_observer(self):
-        import time
         try:
             while True:
                 interval = self.PRICE_UPDATE_INTERVAL_FAST if (self.source and getattr(self.source, 'is_fast_polling', False)) else self.PRICE_UPDATE_INTERVAL_NORMAL
@@ -726,8 +853,8 @@ class WalletAnalysisRunner:
                     self.price_fail_counts[key] = 0
                     self.observer_last_price_time[key] = time.monotonic()
                     entry_price = pos.entry_price_eur
-                    pnl_eur  = (current_price - entry_price) * pos.amount
-                    pnl_pct  = ((current_price - entry_price) / entry_price) * 100
+                    pnl_eur    = (current_price - entry_price) * pos.amount
+                    pnl_pct    = ((current_price - entry_price) / entry_price) * 100
                     change_pct = ((current_price - self.open_positions[key][1]) / self.open_positions[key][1] * 100) if self.open_positions[key][1] > 0 else 0
                     self.open_positions[key] = (account, current_price)
                     if entry_price > 0:
@@ -755,7 +882,6 @@ class WalletAnalysisRunner:
             logger.error(f"[Observer/PriceMonitor] Crashed: {e}")
 
     async def _price_update_loop_analysis(self):
-        import time
         try:
             while True:
                 interval = self.PRICE_UPDATE_INTERVAL_FAST if (self.source and getattr(self.source, 'is_fast_polling', False)) else self.PRICE_UPDATE_INTERVAL_NORMAL
@@ -776,8 +902,8 @@ class WalletAnalysisRunner:
                         continue
                     self.price_fail_counts[key] = 0
                     entry_price = pos.entry_price_eur
-                    pnl_eur  = (current_price - entry_price) * pos.amount
-                    pnl_pct  = ((current_price - entry_price) / entry_price) * 100
+                    pnl_eur    = (current_price - entry_price) * pos.amount
+                    pnl_pct    = ((current_price - entry_price) / entry_price) * 100
                     change_pct = ((current_price - self.open_positions[key][1]) / self.open_positions[key][1] * 100) if self.open_positions[key][1] > 0 else 0
                     self.open_positions[key] = (account, current_price)
                     if entry_price > 0:
@@ -791,19 +917,17 @@ class WalletAnalysisRunner:
                     timeout       = self.tracker.get_inactivity_timeout([account.wallet])
                     inactive_secs = time.monotonic() - lct
                     sl, tp = self.tracker.get_sl_tp_for_wallet(account.wallet)
+                    approx_sell_cost = self.cost_model.calculate(pos.cost_eur).total_cost_eur if self.cost_model else 0.0
+                    eff_pnl = pnl_eur - (self._entry_costs.get(key, 0.0) + approx_sell_cost)
                     emoji = "▲" if pnl_eur > 0 else "▼" if pnl_eur < 0 else "─"
-                    # Effektiver PnL fuer Anzeige (approximiert)
-                    approx_cost = (self._entry_costs.get(key, 0.0) +
-                                   (self.cost_model.calculate(pos.cost_eur).total_cost_eur if self.cost_model else 0.0))
-                    eff_pnl = pnl_eur - approx_cost
                     print(
                         f"{emoji} [Analysis] {token[:8]}... @ {current_price:.8f} EUR | "
                         f"Raw: {pnl_eur:+.2f} EUR ({pnl_pct:+.2f}%) | "
-                        f"Eff: {eff_pnl:+.2f} EUR | {change_pct:+.2f}%"
+                        f"Eff: {eff_pnl:+.2f} EUR | D{change_pct:+.2f}%"
                         + (f" | Inaktiv: {inactive_secs/60:.1f}/{timeout//60}m" if inactive_secs > 30 else "")
                     )
                     if inactive_secs >= timeout:
-                        tags = self.tracker.add_inactivity_tag(account.wallet)
+                        self.tracker.add_inactivity_tag(account.wallet)
                         await self._close_position(token=token, account=account, price_eur=current_price, reason="INACTIVITY", trigger_label=f"Inaktiv {inactive_secs/60:.1f} min")
                         continue
                     if pnl_pct <= sl:
@@ -869,18 +993,19 @@ class WalletAnalysisRunner:
         if not candidates:
             return
         conn_obs = sqlite3.connect(str(obs_db))
-        ready, not_ready = [], []
+        ready = []
         for (wallet,) in candidates:
             count = conn_obs.execute("""SELECT COUNT(*) FROM wallet_trades WHERE wallet=? AND side='SELL'
                 AND reason NOT IN ('SESSION_ENDED','CRASH_RECOVERY') AND price_missing=0""", (wallet,)).fetchone()[0]
-            (ready if count >= 20 else not_ready).append((wallet, count))
+            if count >= 20:
+                ready.append(wallet)
         conn_obs.close()
-        print()
-        print("="*70)
-        print(f" SESSION-ENDE: {len(ready)} Candidates bereit für evaluate_wallets")
-        print("="*70)
         if not ready:
             return
+        print()
+        print("="*70)
+        print(f" SESSION-ENDE: {len(ready)} Candidates bereit -> evaluate_wallets")
+        print("="*70)
         try:
             from runners import evaluate_wallets
             evaluate_wallets.run()
@@ -929,7 +1054,7 @@ class WalletAnalysisRunner:
                                             price_missing=price_missing)
         rt = ""
         if self.start_time:
-            d = datetime.now() - self.start_time
+            d  = datetime.now() - self.start_time
             rt = f"{int(d.total_seconds()//3600)}h {int((d.total_seconds()%3600)//60)}m {int(d.total_seconds()%60)}s"
 
         active_accounts = [a for a in self.accounts.values() if a.num_trades > 0]
@@ -945,17 +1070,14 @@ class WalletAnalysisRunner:
             sorted_accounts = sorted(active_accounts, key=lambda a: a.total_pnl_eur, reverse=True)
             header = f"  {'':1}  {'Wallet':<47} {'Trades':>6} {'Win%':>6} {'Raw PnL':>12}"
             if not self.observer_mode:
-                header += f"  {'Eff. PnL':>12} {'SL':>7} {'TP':>7}"
-            header += f"  {'Conf':>6} {'Label'}"
+                header += f"  {'Eff. PnL':>12}"
             print(header)
-            print("  " + "-"*110)
+            print("  " + "-"*100)
 
-            total_raw = 0.0
-            total_eff = 0.0
+            total_raw = total_eff = 0.0
             for acc in sorted_accounts:
-                conf  = self.tracker.get_confidence(acc.wallet)
-                label = self.tracker.get_strategy_label(acc.wallet)
-                sl, tp = self.tracker.get_sl_tp_for_wallet(acc.wallet) if not self.observer_mode else (None, None)
+                conf    = self.tracker.get_confidence(acc.wallet)
+                label   = self.tracker.get_strategy_label(acc.wallet)
                 raw_pnl = acc.total_pnl_eur
                 eff_pnl = acc.total_effective_pnl_eur
                 total_raw += raw_pnl
@@ -965,14 +1087,12 @@ class WalletAnalysisRunner:
                        f"{acc.num_trades:>5}x {acc.win_rate*100:>5.0f}% "
                        f"{raw_pnl:>+11.2f} EUR")
                 if not self.observer_mode:
-                    sl_str = f"{sl:.0f}%" if sl else "  -"
-                    tp_str = f"+{tp:.0f}%" if tp else "  -"
-                    row += f"  {eff_pnl:>+11.2f} EUR {sl_str:>7} {tp_str:>7}"
-                row += f"  {conf:>6.2f} {label}"
+                    row += f"  {eff_pnl:>+11.2f} EUR"
+                row += f"  {conf:.2f} {label}"
                 print(row)
 
-            print("  " + "-"*110)
-            total_row = f"     {'TOTAL':<47}{'':>6}{'':>6} {total_raw:>+11.2f} EUR"
+            print("  " + "-"*100)
+            total_row = f"     {'TOTAL':<50} {total_raw:>+11.2f} EUR"
             if not self.observer_mode:
                 total_row += f"  {total_eff:>+11.2f} EUR"
             print(total_row)
