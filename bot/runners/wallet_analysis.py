@@ -469,19 +469,19 @@ class WalletAnalysisRunner:
                     except ValueError:
                         print("    Bitte eine ganze Zahl eingeben!")
 
-                while True:
-                    inp = input("   Min. Confidence-Summe aller kaufenden Wallets [0.0]: ").strip()
-                    if not inp:
-                        self.min_confidence_sum = 0.0
+            while True:
+                inp = input("   Min. Confidence-Summe aller kaufenden Wallets [0.0]: ").strip()
+                if not inp:
+                    self.min_confidence_sum = 0.0
+                    break
+                try:
+                    v = float(inp)
+                    if v >= 0.0:
+                        self.min_confidence_sum = v
                         break
-                    try:
-                        v = float(inp)
-                        if v >= 0.0:
-                            self.min_confidence_sum = v
-                            break
-                        print("    Muss >= 0.0 sein!")
-                    except ValueError:
-                        print("    Bitte eine Zahl eingeben!")
+                    print("    Muss >= 0.0 sein!")
+                except ValueError:
+                    print("    Bitte eine Zahl eingeben!")
 
         while True:
             inp = input("  Connection Timeout (Sekunden) [30]: ").strip()
@@ -516,8 +516,11 @@ class WalletAnalysisRunner:
                 print(f"   BUY-Filter:         >= {self.min_wallets_for_buy} Wallets | "
                       f"{self.buy_signal_window_sec}s Fenster | "
                       f"Conf-Summe >= {self.min_confidence_sum:.1f}")
+            elif self.min_confidence_sum > 0.0:
+                print(f"   BUY-Filter:         1 Wallet reicht | "
+                      f"Conf-Summe >= {self.min_confidence_sum:.1f} (auch Einzelwallet geprueft)")
             else:
-                print(f"   BUY-Filter:         1 Wallet reicht (keine Redundanz)")
+                print(f"   BUY-Filter:         deaktiviert (1 Wallet, kein Conf-Limit)")
         print(f"   Connection Timeout: {self.config['failure_threshold']}s")
         src_str = f"Parallel-Key ({self.num_parallel_keys} Keys)" if self.use_parallel else "Multi-Key" if self.use_websocket else "Polling"
         print(f"   Trade-Source:       {src_str}")
@@ -616,9 +619,15 @@ class WalletAnalysisRunner:
 
         Gibt True zurueck wenn der Trade ausgefuehrt werden soll.
         Gibt False zurueck wenn das Signal noch nicht stark genug ist (kein Trade).
-        Im Observer-Modus oder bei min_wallets=1 immer True.
+        Im Observer-Modus immer True.
+        Bei min_wallets=1 UND min_confidence_sum=0 auch True (Filter deaktiviert).
+        Bei min_wallets=1 aber min_confidence_sum>0: Confidence-Summe wird trotzdem geprueft
+        (erlaubt schwache Einzelwallet-Signale durch Conf-Schwelle zu filtern).
         """
-        if self.observer_mode or self.min_wallets_for_buy <= 1:
+        if self.observer_mode:
+            return True
+        # Kein Filter aktiv wenn weder Wallet-Mindestanzahl noch Confidence-Summe gesetzt
+        if self.min_wallets_for_buy <= 1 and self.min_confidence_sum <= 0.0:
             return True
 
         now    = time.monotonic()
