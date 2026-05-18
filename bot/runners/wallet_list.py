@@ -155,12 +155,88 @@ def compute_wallet_stats_excluding(trades_by_wallet, excluded):
     return result
 
 
+def load_combined_confidence(wallets, db_analysis, db_observer):
+    """Berechnet kombinierten Confidence Score fuer alle Wallets."""
+    import math
+    BLACKLIST_CONF_THRESHOLD    = 0.05
+    MIN_ANALYSIS_FOR_BLACKLIST  = 20
+    MIN_ANALYSIS_FOR_FACTOR     = 10
+    ANALYSIS_FACTOR_FULL_WEIGHT = 30
+
+    # Observer-Confidence laden
+    obs_conf = {}
+    if Path(db_observer).exists():
+        try:
+            conn = connect(db_observer)
+            rows = conn.execute("SELECT wallet, confidence_score FROM wallet_stats").fetchall()
+            conn.close()
+            obs_conf = {r['wallet']: r['confidence_score'] for r in rows}
+        except Exception:
+            pass
+
+    # Analysis-Stats laden
+    anl_conf  = {}
+    anl_trades = {}
+    anl_avg_pnl = {}
+    if Path(db_analysis).exists():
+        try:
+            conn = connect(db_analysis)
+            stat_rows = conn.execute("SELECT wallet, confidence_score FROM wallet_stats").fetchall()
+            anl_conf = {r['wallet']: r['confidence_score'] for r in stat_rows}
+            trade_rows = conn.execute("""
+                SELECT wallet, AVG(pnl_eur) as avg_pnl, COUNT(*) as n
+                FROM wallet_trades
+                WHERE side='SELL' AND pnl_eur IS NOT NULL AND price_missing=0
+                  AND (reason IS NULL OR reason NOT IN ('SESSION_ENDED','CRASH_RECOVERY'))
+                GROUP BY wallet
+            """).fetchall()
+            conn.close()
+            for r in trade_rows:
+                anl_trades[r['wallet']]  = r['n']
+                anl_avg_pnl[r['wallet']] = r['avg_pnl'] or 0.0
+        except Exception:
+            pass
+
+    result = {}
+    for w in wallets:
+        obs   = obs_conf.get(w, 0.0)
+        a_conf = anl_conf.get(w, 0.0)
+        n      = anl_trades.get(w, 0)
+        avg    = anl_avg_pnl.get(w, 0.0)
+
+        factor = 1.0
+        if n >= MIN_ANALYSIS_FOR_FACTOR:
+            weight = min(n / ANALYSIS_FACTOR_FULL_WEIGHT, 1.0)
+            factor = round(max(0.5, min(1.5, 1.0 + math.tanh(avg / 50.0) * weight * 0.5)), 4)
+
+        combined = round(min(1.0, obs * factor), 4)
+
+        blacklisted      = False
+        blacklist_reason = ""
+        if n >= MIN_ANALYSIS_FOR_BLACKLIST and a_conf < BLACKLIST_CONF_THRESHOLD:
+            blacklisted      = True
+            blacklist_reason = f"Analysis-Conf {a_conf:.4f} < {BLACKLIST_CONF_THRESHOLD} nach {n} Trades"
+            combined         = 0.0
+
+        result[w] = {
+            'observer_conf':    obs,
+            'analysis_conf':    a_conf,
+            'analysis_trades':  n,
+            'analysis_avg_pnl': round(avg, 2),
+            'analysis_factor':  factor,
+            'combined':         combined,
+            'blacklisted':      blacklisted,
+            'blacklist_reason': blacklist_reason,
+        }
+    return result
+
+
 def pnl_color(val):
     if val is None: return "#888"
     return "#4ade80" if val > 0 else "#f87171" if val < 0 else "#888"
 
 
-def generate_html(stats, categories, obs_counts, all_trades, excluded, db_label):
+def generate_html(stats, categories, obs_counts, all_trades, excluded, db_label, combined_conf):
     all_wallets = {}
     for s in stats:
         all_wallets[s['wallet']] = s
@@ -175,39 +251,50 @@ def generate_html(stats, categories, obs_counts, all_trades, excluded, db_label)
     wallet_list = list(all_wallets.values())
     live_stats  = compute_wallet_stats_excluding(all_trades, excluded)
 
-    trades_json     = json.dumps(all_trades, default=str)
-    categories_json = json.dumps(categories)
-    obs_counts_json = json.dumps(obs_counts)
-    excluded_json   = json.dumps(list(excluded))
-    live_stats_json = json.dumps(live_stats)
+    trades_json        = json.dumps(all_trades, default=str)
+    categories_json    = json.dumps(categories)
+    obs_counts_json    = json.dumps(obs_counts)
+    excluded_json      = json.dumps(list(excluded))
+    live_stats_json    = json.dumps(live_stats)
+    combined_conf_json = json.dumps(combined_conf)
 
     import math as _math
     conf_data = {}
     for s in stats:
-        addr    = s['wallet']
-        n       = s.get('total_trades', 0) or 0
-        wr      = s.get('win_rate', 0) or 0
-        avg_pnl = s.get('avg_pnl_eur', 0) or 0
+        addr     = s['wallet']
+        n        = s.get('total_trades', 0) or 0
+        wr       = s.get('win_rate', 0) or 0
+        avg_pnl  = s.get('avg_pnl_eur', 0) or 0
+        cc       = combined_conf.get(addr, {})
 
-        wr_component   = wr * 0.55
-        avg_pnl_norm   = max(_math.tanh(avg_pnl / 50.0), 0.0) if avg_pnl else 0.0
-        pnl_component  = avg_pnl_norm * 0.45
-        trade_factor   = min(n / 100.0, 1.0)
-        raw_score      = wr_component + pnl_component
-        live_conf      = round(max(0.0, min(1.0, raw_score * trade_factor)), 4)
+        wr_component  = wr * 0.55
+        avg_pnl_norm  = max(_math.tanh(avg_pnl / 50.0), 0.0) if avg_pnl else 0.0
+        pnl_component = avg_pnl_norm * 0.45
+        trade_factor  = min(n / 100.0, 1.0)
+        raw_score     = wr_component + pnl_component
+        live_conf     = round(max(0.0, min(1.0, raw_score * trade_factor)), 4)
 
         conf_data[addr] = {
-            'n':             n,
-            'wr':            round(wr * 100, 1),
-            'wr_component':  round(wr_component, 4),
-            'pnl_component': round(pnl_component, 4),
-            'trade_factor':  round(trade_factor, 4),
-            'raw_score':     round(raw_score, 4),
-            'live_conf':     live_conf,
-            'avg_pnl':       round(avg_pnl, 2),
-            'avg_pnl_norm':  round(avg_pnl_norm, 4),
-            'wins':          s.get('winning_trades', 0) or 0,
-            'losses':        s.get('losing_trades', 0) or 0,
+            'n':              n,
+            'wr':             round(wr * 100, 1),
+            'wr_component':   round(wr_component, 4),
+            'pnl_component':  round(pnl_component, 4),
+            'trade_factor':   round(trade_factor, 4),
+            'raw_score':      round(raw_score, 4),
+            'live_conf':      live_conf,
+            'avg_pnl':        round(avg_pnl, 2),
+            'avg_pnl_norm':   round(avg_pnl_norm, 4),
+            'wins':           s.get('winning_trades', 0) or 0,
+            'losses':         s.get('losing_trades', 0) or 0,
+            # Combined confidence Felder
+            'observer_conf':    cc.get('observer_conf', live_conf),
+            'analysis_conf':    cc.get('analysis_conf', 0.0),
+            'analysis_trades':  cc.get('analysis_trades', 0),
+            'analysis_avg_pnl': cc.get('analysis_avg_pnl', 0.0),
+            'analysis_factor':  cc.get('analysis_factor', 1.0),
+            'combined':         cc.get('combined', live_conf),
+            'blacklisted':      cc.get('blacklisted', False),
+            'blacklist_reason': cc.get('blacklist_reason', ''),
         }
     conf_data_json = json.dumps(conf_data)
 
@@ -222,9 +309,17 @@ def generate_html(stats, categories, obs_counts, all_trades, excluded, db_label)
         obs_cnt = obs_counts.get(addr, 0)
         ls      = live_stats.get(addr, {})
 
-        # Zeige den live berechneten Score in der Tabelle
-        cd = conf_data.get(addr, {})
-        display_conf = cd.get('live_conf', conf)
+        cd           = conf_data.get(addr, {})
+        obs_c        = cd.get('observer_conf', conf)
+        combined_c   = cd.get('combined', conf)
+        blacklisted  = cd.get('blacklisted', False)
+        anl_factor   = cd.get('analysis_factor', 1.0)
+        anl_trades_n = cd.get('analysis_trades', 0)
+        display_conf = combined_c
+
+        factor_color = '#4ade80' if anl_factor > 1.05 else '#f87171' if anl_factor < 0.95 else '#888'
+        factor_str   = f"{anl_factor:+.2f}×" if anl_factor != 1.0 else "1.00×"
+        blacklist_badge = '<span style="background:#f8717122;color:#f87171;font-size:9px;padding:1px 5px;border-radius:6px;margin-left:4px;">BL</span>' if blacklisted else ''
 
         sl_str = f"{sl:.1f}%" if sl is not None else "-"
         tp_str = f"+{tp:.1f}%" if tp is not None else "-"
@@ -456,11 +551,19 @@ function showConfBreakdown(addr) {{
   const d = CONF_DATA[addr];
   if (!d) {{ alert('Keine Confidence-Daten für dieses Wallet.'); return; }}
 
-  // Live Score aus Formel berechnen (nicht gespeicherter DB-Wert)
-  const liveScore = Math.min(Math.max(d.raw_score * d.trade_factor, 0), 1);
-  const liveColor = liveScore >= 0.6 ? '#4ade80' : liveScore >= 0.35 ? '#facc15' : '#f87171';
+  const obsScore    = d.observer_conf || d.live_conf || 0;
+  const anlFactor   = d.analysis_factor || 1.0;
+  const combined    = d.combined !== undefined ? d.combined : obsScore;
+  const anlTrades   = d.analysis_trades || 0;
+  const anlAvgPnl   = d.analysis_avg_pnl || 0;
+  const blacklisted = d.blacklisted || false;
+  const blReason    = d.blacklist_reason || '';
 
-  // Schritt 1: WinRate + AvgPnL → raw_score
+  const combinedColor = combined >= 0.6 ? '#4ade80' : combined >= 0.35 ? '#facc15' : '#f87171';
+  const obsColor      = obsScore >= 0.6 ? '#4ade80' : obsScore >= 0.35 ? '#facc15' : '#f87171';
+  const factorColor   = anlFactor > 1.05 ? '#4ade80' : anlFactor < 0.95 ? '#f87171' : '#888';
+
+  // Observer Basis-Score Aufschlüsselung
   const step1 = [
     {{
       label: 'Win Rate',
@@ -480,7 +583,9 @@ function showConfBreakdown(addr) {{
     }},
   ];
 
-  let body = '<div style="font-size:11px;color:#555;margin-bottom:12px;">Schritt 1: Basis-Score (WinRate + AvgPnL)</div>';
+  let body = `<div style="font-size:11px;color:#555;margin-bottom:8px;">Schritt 1: Observer-Confidence (Basis)</div>
+    <div style="font-size:10px;color:#444;margin-bottom:12px;">Quelle: observer_performance.db – echtes Wallet-Verhalten</div>`;
+
   for (const c of step1) {{
     const pct = c.max > 0 ? Math.min(c.val/c.max*100,100) : 0;
     body += `<div class="conf-row">
@@ -491,34 +596,64 @@ function showConfBreakdown(addr) {{
     <div style="font-size:10px;color:#444;margin:-6px 0 10px 190px;">Rohwert: ${{c.raw}} → max ${{c.max.toFixed(2)}} Pkt</div>`;
   }}
 
-  body += `<div style="background:#1a1a1a;border:1px solid #2a2a2a;border-radius:6px;padding:10px 14px;margin:12px 0;display:flex;justify-content:space-between;align-items:center;">
-    <span style="font-size:12px;color:#888;">Basis-Score (max 1.0)</span>
-    <span style="font-size:16px;font-weight:700;color:#ddd;">${{d.raw_score.toFixed(4)}}</span>
-  </div>`;
-
-  // Schritt 2: × trade_factor
   const tfPct = Math.min(d.trade_factor * 100, 100);
-  body += `<div style="font-size:11px;color:#555;margin-bottom:12px;margin-top:4px;">Schritt 2: Dämpfung durch Trade-Anzahl</div>
-  <div class="conf-row">
+  body += `<div class="conf-row" style="margin-top:4px;">
     <div class="clabel">Trade-Faktor<br><span style="font-size:10px;color:#555;">min(${{d.n}} / 100, 1.0)</span></div>
     <div class="conf-bar-wrap"><div class="conf-bar-fill" style="width:${{tfPct.toFixed(1)}}%;background:#fb923c;"></div></div>
     <div class="cval" style="color:#fb923c;">${{d.trade_factor.toFixed(2)}}×</div>
   </div>
   <div style="font-size:10px;color:#444;margin:-6px 0 12px 190px;">${{d.n}} von 100 Trades → ${{(d.trade_factor*100).toFixed(0)}}% Gewichtung</div>`;
 
-  // Ergebnis (live berechnet)
-  body += `<div style="margin-top:16px;padding-top:14px;border-top:1px solid #222;">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-      <span style="font-size:13px;color:#aaa;">${{d.raw_score.toFixed(4)}} × ${{d.trade_factor.toFixed(2)}} =</span>
-      <span style="font-size:22px;font-weight:700;color:${{liveColor}};">${{liveScore.toFixed(4)}}</span>
-    </div>
-    <div style="background:#222;border-radius:4px;height:10px;">
-      <div style="background:${{liveColor}};width:${{Math.min(liveScore*100,100).toFixed(1)}}%;height:10px;border-radius:4px;"></div>
-    </div>
+  // Observer Score Box
+  body += `<div style="background:#1a1a1a;border:1px solid #2a2a2a;border-radius:6px;padding:10px 14px;margin:12px 0;display:flex;justify-content:space-between;align-items:center;">
+    <span style="font-size:12px;color:#888;">Observer-Confidence</span>
+    <span style="font-size:18px;font-weight:700;color:${{obsColor}};">${{obsScore.toFixed(4)}}</span>
   </div>`;
 
-  document.getElementById('conf-popup-score').textContent = liveScore.toFixed(2);
-  document.getElementById('conf-popup-score').style.color = liveColor;
+  // Schritt 2: Analysis-Korrekturfaktor
+  body += `<div style="font-size:11px;color:#555;margin:16px 0 8px;">Schritt 2: Analysis-Korrekturfaktor</div>
+    <div style="font-size:10px;color:#444;margin-bottom:12px;">Quelle: wallet_performance.db – wie der Bot auf dieses Wallet reagiert</div>`;
+
+  if (anlTrades < 10) {{
+    body += `<div style="background:#1a1a1a;border:1px solid #222;border-radius:6px;padding:10px 14px;color:#555;font-size:12px;">
+      Noch keine Analysis-Daten (${{anlTrades}}/10 Trades) – Faktor = 1.00× (neutral)
+    </div>`;
+  }} else {{
+    const factorPct = Math.min(Math.abs((anlFactor - 1.0) / 0.5) * 100, 100);
+    const factorStr = anlFactor >= 1.0 ? `+${{((anlFactor-1)*100).toFixed(0)}}%` : `${{((anlFactor-1)*100).toFixed(0)}}%`;
+    body += `<div class="conf-row">
+      <div class="clabel">Analysis-Faktor<br><span style="font-size:10px;color:#555;">tanh(${{anlAvgPnl>=0?'+':''}}${{anlAvgPnl.toFixed(2)}}/50) × weight(${{anlTrades}}T)</span></div>
+      <div class="conf-bar-wrap"><div class="conf-bar-fill" style="width:${{factorPct.toFixed(1)}}%;background:${{factorColor}};"></div></div>
+      <div class="cval" style="color:${{factorColor}};">${{anlFactor.toFixed(3)}}×</div>
+    </div>
+    <div style="font-size:10px;color:#444;margin:-6px 0 12px 190px;">
+      ${{anlTrades}} Analysis-Trades | Ø PnL: ${{anlAvgPnl>=0?'+':''}}${{anlAvgPnl.toFixed(2)}} EUR | Anpassung: ${{factorStr}}
+    </div>`;
+  }}
+
+  // Blacklist
+  if (blacklisted) {{
+    body += `<div style="background:#f8717115;border:1px solid #f8717133;border-radius:6px;padding:10px 14px;margin:12px 0;">
+      <span style="color:#f87171;font-weight:700;">⛔ BLACKLISTED</span>
+      <div style="font-size:11px;color:#f87171;margin-top:4px;">${{blReason}}</div>
+      <div style="font-size:10px;color:#888;margin-top:4px;">Dieses Wallet wird im Analysis-Modus ignoriert.</div>
+    </div>`;
+  }}
+
+  // Finaler Combined Score
+  body += `<div style="margin-top:16px;padding-top:14px;border-top:1px solid #222;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+      <span style="font-size:13px;color:#aaa;">${{obsScore.toFixed(4)}} × ${{anlFactor.toFixed(3)}} =</span>
+      <span style="font-size:22px;font-weight:700;color:${{combinedColor}};">${{combined.toFixed(4)}}</span>
+    </div>
+    <div style="background:#222;border-radius:4px;height:10px;">
+      <div style="background:${{combinedColor}};width:${{Math.min(combined*100,100).toFixed(1)}}%;height:10px;border-radius:4px;"></div>
+    </div>
+    <div style="font-size:10px;color:#555;margin-top:6px;">Combined Score = Observer-Basis × Analysis-Faktor</div>
+  </div>`;
+
+  document.getElementById('conf-popup-score').textContent = combined.toFixed(2);
+  document.getElementById('conf-popup-score').style.color = combinedColor;
   document.getElementById('conf-popup-addr').textContent  = addr;
   document.getElementById('conf-popup-body').innerHTML    = body;
   document.getElementById('conf-popup').classList.add('open');
@@ -773,11 +908,13 @@ def run(args=None):
     obs_counts = load_observer_trade_counts(list(categories.keys()))
     all_trades = load_all_trades(db_path)
     excluded   = load_excluded()
+    all_wallets_list = list(set(list(categories.keys()) + [s['wallet'] for s in stats]))
+    combined_conf = load_combined_confidence(all_wallets_list, DB_ANALYSIS, DB_OBSERVER)
 
     total_trades = sum(len(v) for v in all_trades.values())
     print(f"[WalletList] {len(all_trades)} Wallets | {total_trades} Trades | {len(excluded)} ausgeschlossen")
 
-    _html_content = generate_html(stats, categories, obs_counts, all_trades, excluded, db_label)
+    _html_content = generate_html(stats, categories, obs_counts, all_trades, excluded, db_label, combined_conf)
 
     server = HTTPServer(("127.0.0.1", PORT), Handler)
     t = threading.Thread(target=server.serve_forever, daemon=True)

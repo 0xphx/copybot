@@ -519,9 +519,17 @@ def merge_db(local_db: Path, remote_db: Path):
             session_id TEXT, wallet TEXT, token TEXT, side TEXT,
             amount REAL, price_eur REAL, value_eur REAL, pnl_eur REAL,
             pnl_percent REAL, price_missing INTEGER, max_price_pct REAL,
-            min_price_pct REAL, timestamp TEXT, reason TEXT
+            min_price_pct REAL, timestamp TEXT, reason TEXT,
+            cost_eur REAL, effective_pnl_eur REAL
         )
     """)
+
+    # Migration: fehlende Spalten tolerant hinzufuegen (fuer aeltere lokale DBs)
+    for col, typedef in [("cost_eur", "REAL"), ("effective_pnl_eur", "REAL")]:
+        try:
+            cur_local.execute(f"ALTER TABLE wallet_trades ADD COLUMN {col} {typedef}")
+        except Exception:
+            pass  # Spalte existiert bereits
 
     # Bestehende Session-IDs lokal
     cur_local.execute("SELECT DISTINCT session_id FROM wallet_trades")

@@ -543,6 +543,21 @@ class WalletTracker:
         return row['strategy_label'] if row else 'UNKNOWN'
 
     def get_confidence(self, wallet: str) -> float:
+        # Im Analysis-Modus: immer Observer-DB als Quelle fuer Confidence
+        if not self.observer_mode and self.observer_db_path:
+            try:
+                obs_conn = sqlite3.connect(self.observer_db_path)
+                obs_conn.row_factory = sqlite3.Row
+                obs_cursor = obs_conn.cursor()
+                obs_cursor.execute("SELECT confidence_score FROM wallet_stats WHERE wallet = ?", (wallet,))
+                obs_row = obs_cursor.fetchone()
+                obs_conn.close()
+                if obs_row:
+                    return obs_row['confidence_score']
+            except Exception as e:
+                logger.debug(f"[WalletTracker] Observer-Confidence Fehler {wallet[:8]}: {e}")
+
+        # Observer-Modus oder kein observer_db_path: lokale DB
         conn = self._connect()
         cursor = conn.cursor()
         cursor.execute("SELECT confidence_score FROM wallet_stats WHERE wallet = ?", (wallet,))
@@ -550,9 +565,105 @@ class WalletTracker:
         conn.close()
         return row['confidence_score'] if row else 0.0
 
+    def get_combined_confidence(self, wallet: str) -> dict:
+        """
+        Kombinierter Confidence Score fuer den Analysis-Modus.
+
+        Gibt ein Dict zurueck mit:
+          observer_conf:    Confidence aus Observer-DB (Basis)
+          analysis_conf:    Confidence aus Analysis-DB (Korrekturfaktor)
+          analysis_trades:  Anzahl Analysis-Trades
+          analysis_factor:  Korrekturfaktor (tanh-basiert, 0.5-1.5)
+          combined:         Finaler Score = observer_conf * analysis_factor
+          blacklisted:      True wenn Analysis nach >= 20 Trades dauerhaft schlecht
+          blacklist_reason: Erklaerung warum blacklisted
+
+        Logik:
+          - Observer-Confidence ist immer die Basis
+          - Ab MIN_ANALYSIS_FOR_FACTOR Analysis-Trades wird ein Korrekturfaktor berechnet:
+              factor = 0.5 + tanh(analysis_avg_pnl / 50) * weight
+              weight = min(n_analysis / ANALYSIS_FACTOR_FULL_WEIGHT, 1.0)
+            Faktor < 1.0 drueckt Score, > 1.0 hebt ihn
+          - Blacklist: analysis_conf < BLACKLIST_CONF_THRESHOLD nach >= MIN_ANALYSIS_FOR_BLACKLIST Trades
+        """
+        BLACKLIST_CONF_THRESHOLD   = 0.05   # Unter diesem Wert -> Blacklist
+        MIN_ANALYSIS_FOR_BLACKLIST = 20     # Mindest-Analysis-Trades fuer Blacklist
+        MIN_ANALYSIS_FOR_FACTOR    = 10     # Ab wann Korrekturfaktor greift
+        ANALYSIS_FACTOR_FULL_WEIGHT = 30    # Ab wann volle Gewichtung
+
+        observer_conf = self.get_confidence(wallet)
+
+        # Analysis-Stats holen
+        conn = self._connect()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT pnl_eur FROM wallet_trades
+            WHERE wallet = ? AND side = 'SELL' AND pnl_eur IS NOT NULL
+              AND price_missing = 0
+              AND (reason IS NULL OR reason NOT IN ('SESSION_ENDED', 'CRASH_RECOVERY'))
+        """, (wallet,))
+        analysis_rows = cursor.fetchall()
+        cursor.execute("SELECT confidence_score FROM wallet_stats WHERE wallet = ?", (wallet,))
+        stats_row = cursor.fetchone()
+        conn.close()
+
+        analysis_trades = len(analysis_rows)
+        analysis_conf   = stats_row['confidence_score'] if stats_row else 0.0
+        analysis_avg_pnl = (sum(r['pnl_eur'] for r in analysis_rows) / analysis_trades
+                            if analysis_trades > 0 else 0.0)
+
+        # Korrekturfaktor berechnen
+        analysis_factor = 1.0
+        if analysis_trades >= MIN_ANALYSIS_FOR_FACTOR:
+            weight          = min(analysis_trades / ANALYSIS_FACTOR_FULL_WEIGHT, 1.0)
+            raw_factor      = math.tanh(analysis_avg_pnl / 50.0)  # -1 bis +1
+            analysis_factor = round(1.0 + raw_factor * weight * 0.5, 4)  # 0.5 bis 1.5
+            analysis_factor = max(0.5, min(1.5, analysis_factor))
+
+        combined = round(min(1.0, observer_conf * analysis_factor), 4)
+
+        # Blacklist pruefen
+        blacklisted      = False
+        blacklist_reason = ""
+        if analysis_trades >= MIN_ANALYSIS_FOR_BLACKLIST and analysis_conf < BLACKLIST_CONF_THRESHOLD:
+            blacklisted      = True
+            blacklist_reason = (f"Analysis-Confidence {analysis_conf:.4f} < {BLACKLIST_CONF_THRESHOLD} "
+                                f"nach {analysis_trades} Trades")
+            combined         = 0.0
+            logger.debug(f"[WalletTracker] {wallet[:8]}... BLACKLISTED: {blacklist_reason}")
+
+        return {
+            'observer_conf':    observer_conf,
+            'analysis_conf':    analysis_conf,
+            'analysis_trades':  analysis_trades,
+            'analysis_avg_pnl': round(analysis_avg_pnl, 2),
+            'analysis_factor':  analysis_factor,
+            'combined':         combined,
+            'blacklisted':      blacklisted,
+            'blacklist_reason': blacklist_reason,
+        }
+
     def get_confidence_map(self, wallets: List[str]) -> Dict[str, float]:
         if not wallets:
             return {}
+
+        # Im Analysis-Modus: immer Observer-DB als Quelle
+        if not self.observer_mode and self.observer_db_path:
+            try:
+                obs_conn = sqlite3.connect(self.observer_db_path)
+                obs_conn.row_factory = sqlite3.Row
+                obs_cursor = obs_conn.cursor()
+                placeholders = ",".join("?" for _ in wallets)
+                obs_cursor.execute(f"SELECT wallet, confidence_score FROM wallet_stats WHERE wallet IN ({placeholders})", wallets)
+                result = {w: 0.0 for w in wallets}
+                for row in obs_cursor.fetchall():
+                    result[row['wallet']] = row['confidence_score']
+                obs_conn.close()
+                return result
+            except Exception as e:
+                logger.debug(f"[WalletTracker] Observer-ConfidenceMap Fehler: {e}")
+
+        # Observer-Modus oder kein observer_db_path: lokale DB
         conn = self._connect()
         cursor = conn.cursor()
         placeholders = ",".join("?" for _ in wallets)

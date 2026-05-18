@@ -639,8 +639,14 @@ class WalletAnalysisRunner:
             if ts >= cutoff
         ]
 
+        # Kombinierte Confidence holen (Observer-Basis + Analysis-Korrekturfaktor + Blacklist)
+        combined = self.tracker.get_combined_confidence(wallet)
+        if combined['blacklisted']:
+            logger.info(f"[Redundanz] {wallet[:8]}... BLACKLISTED – {combined['blacklist_reason']}")
+            return False
+        confidence = combined['combined']
+
         # Aktuelles Signal eintragen
-        confidence = self.tracker.get_confidence(wallet)
         self._buy_signals[token].append((wallet, now, confidence))
 
         # Deduplizieren: pro Wallet nur das neueste Signal
@@ -657,7 +663,8 @@ class WalletAnalysisRunner:
         logger.info(
             f"[Redundanz] {token[:8]}... | "
             f"{n_wallets}/{self.min_wallets_for_buy} Wallets | "
-            f"Conf: {total_conf:.2f}/{self.min_confidence_sum:.2f} | [{names}]"
+            f"Conf: {total_conf:.2f}/{self.min_confidence_sum:.2f} | "
+            f"Factor: {combined['analysis_factor']:.2f} | [{names}]"
         )
 
         if n_wallets < self.min_wallets_for_buy:
