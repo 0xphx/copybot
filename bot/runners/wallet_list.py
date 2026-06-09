@@ -436,7 +436,14 @@ def generate_html(stats, categories, obs_counts, all_trades, excluded, db_label,
 <div class="header">
   <h1>Copybot <span style="color:#555;font-weight:400;">Wallet Übersicht</span></h1>
   <div style="display:flex;gap:8px;align-items:center;">
-    <span class="badge">{db_label}</span>
+    <div id="db-toggle" style="display:flex;background:#1a1a1a;border:1px solid #2a2a2a;border-radius:8px;overflow:hidden;">
+      <button id="btn-observer" onclick="switchMode('observer')"
+        style="padding:4px 12px;font-size:12px;border:none;cursor:pointer;transition:all .15s;"
+        class="toggle-btn">Observer</button>
+      <button id="btn-analysis" onclick="switchMode('analysis')"
+        style="padding:4px 12px;font-size:12px;border:none;cursor:pointer;transition:all .15s;"
+        class="toggle-btn">Analysis</button>
+    </div>
     <span class="badge" id="wallet-count">–</span>
     <button onclick="location.reload()" style="background:#222;border:none;color:#aaa;padding:4px 10px;border-radius:6px;cursor:pointer;font-size:12px;">↻</button>
   </div>
@@ -846,20 +853,56 @@ function updateStatsBar() {{
     <div class="stat"><div class="stat-label">Ausgeschlossen</div><div class="stat-value" style="color:${{EXCLUDED.size>0?'#fb923c':'#555'}};font-size:16px;">${{EXCLUDED.size}}</div></div>`;
 }}
 
+// ── DB Toggle ────────────────────────────────────────────────────────
+
+let _activeMode = '{db_label.lower()}';
+
+function updateToggleButtons(mode) {{
+  document.getElementById('btn-observer').style.cssText =
+    mode === 'observer'
+      ? 'padding:4px 12px;font-size:12px;border:none;cursor:pointer;background:#4ade80;color:#000;font-weight:700;'
+      : 'padding:4px 12px;font-size:12px;border:none;cursor:pointer;background:transparent;color:#aaa;';
+  document.getElementById('btn-analysis').style.cssText =
+    mode === 'analysis'
+      ? 'padding:4px 12px;font-size:12px;border:none;cursor:pointer;background:#60a5fa;color:#000;font-weight:700;'
+      : 'padding:4px 12px;font-size:12px;border:none;cursor:pointer;background:transparent;color:#aaa;';
+}}
+
+function switchMode(mode) {{
+  if (mode === _activeMode) return;
+  fetch('http://localhost:{PORT}/switch_mode', {{
+    method: 'POST',
+    headers: {{'Content-Type': 'application/json'}},
+    body: JSON.stringify({{mode}})
+  }}).then(() => {{
+    location.reload();
+  }}).catch(err => console.error('Switch fehlgeschlagen:', err));
+}}
+
+updateToggleButtons(_activeMode);
 updateExcludedBar(); sortTable('pnl'); filterTable();
 </script>
 </body>
 </html>"""
 
 
-_html_content = ""
+_html_observer = ""
+_html_analysis = ""
+_current_mode  = "observer"  # oder "analysis"
 
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path in ("/", "/index.html"):
-            body = _html_content.encode('utf-8')
+            body = (_html_analysis if _current_mode == "analysis" else _html_observer).encode('utf-8')
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path == "/current_mode":
+            body = json.dumps({"mode": _current_mode}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
@@ -867,7 +910,23 @@ class Handler(BaseHTTPRequestHandler):
             self.send_response(404); self.end_headers()
 
     def do_POST(self):
-        if self.path == "/save_excluded":
+        global _current_mode
+        if self.path == "/switch_mode":
+            length = int(self.headers.get("Content-Length", 0))
+            body   = self.rfile.read(length)
+            try:
+                data = json.loads(body)
+                new_mode = data.get("mode", "observer")
+                if new_mode in ("observer", "analysis"):
+                    _current_mode = new_mode
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(json.dumps({"ok": True, "mode": _current_mode}).encode())
+            except Exception as e:
+                self.send_response(500); self.end_headers()
+                self.wfile.write(json.dumps({"error": str(e)}).encode())
+        elif self.path == "/save_excluded":
             length = int(self.headers.get("Content-Length", 0))
             body   = self.rfile.read(length)
             try:
@@ -894,27 +953,31 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def run(args=None):
-    global _html_content
+    global _html_observer, _html_analysis, _current_mode
     if args is None:
         args = []
 
-    use_analysis = "--analysis" in args
-    db_path      = DB_ANALYSIS if use_analysis else DB_OBSERVER
-    db_label     = "ANALYSIS"  if use_analysis else "OBSERVER"
+    _current_mode = "analysis" if "--analysis" in args else "observer"
 
-    print(f"[WalletList] Lade Daten ({db_label})...")
-    stats      = load_wallet_stats(db_path)
-    categories = load_wallet_categories()
-    obs_counts = load_observer_trade_counts(list(categories.keys()))
-    all_trades = load_all_trades(db_path)
-    excluded   = load_excluded()
-    all_wallets_list = list(set(list(categories.keys()) + [s['wallet'] for s in stats]))
-    combined_conf = load_combined_confidence(all_wallets_list, DB_ANALYSIS, DB_OBSERVER)
+    categories       = load_wallet_categories()
+    excluded         = load_excluded()
+    all_wallets_keys = list(categories.keys())
 
-    total_trades = sum(len(v) for v in all_trades.values())
-    print(f"[WalletList] {len(all_trades)} Wallets | {total_trades} Trades | {len(excluded)} ausgeschlossen")
+    def _build(db_path, db_label):
+        stats      = load_wallet_stats(db_path)
+        obs_counts = load_observer_trade_counts(list(categories.keys()))
+        all_trades = load_all_trades(db_path)
+        all_wallets_list = list(set(all_wallets_keys + [s['wallet'] for s in stats]))
+        combined_conf    = load_combined_confidence(all_wallets_list, DB_ANALYSIS, DB_OBSERVER)
+        total_trades     = sum(len(v) for v in all_trades.values())
+        print(f"[WalletList] {db_label}: {len(all_trades)} Wallets | {total_trades} Trades")
+        return generate_html(stats, categories, obs_counts, all_trades, excluded, db_label, combined_conf)
 
-    _html_content = generate_html(stats, categories, obs_counts, all_trades, excluded, db_label, combined_conf)
+    print("[WalletList] Lade Observer-DB...")
+    _html_observer = _build(DB_OBSERVER, "OBSERVER")
+    print("[WalletList] Lade Analysis-DB...")
+    _html_analysis = _build(DB_ANALYSIS, "ANALYSIS")
+    print(f"[WalletList] {len(excluded)} Trades ausgeschlossen | Startmodus: {_current_mode.upper()}")
 
     server = HTTPServer(("127.0.0.1", PORT), Handler)
     t = threading.Thread(target=server.serve_forever, daemon=True)
